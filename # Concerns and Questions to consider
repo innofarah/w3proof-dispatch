@@ -1,0 +1,10 @@
+# Concerns and Questions to consider
+
+- The difference we have between the original files and the constructed files is : spaces and new lines, changing location of specification and imports (we put them at the beginning even if originally there were comments before them). does this matter?
+- Does the change in the location of imports matter? (if an import was in the middle of the file, and we are currently putting all the imports at the beginning of the file, does this matter with respect to abella?)
+- We assumed that a specification file would have a different name than other theorem files in the same directory (since we use the name as a key in the code), but this can be fixed.
+- Deal with the /* */ comment
+- Escape all characters in comments (the single quote for example)
+-
+
+- Is this tool generalizable for other file formats?
