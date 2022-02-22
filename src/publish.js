@@ -9,16 +9,16 @@ let publishedObjs = {}
 let config = "", gateway = "", web3Token = "", web3Client = ""
 
 let platform = os.platform()
-    let configpath = ""
-    if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos') {
-        configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
-    }
-    else if (platform == 'darwin') {
+let configpath = ""
+if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos') {
+    configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
+}
+else if (platform == 'darwin') {
 
-    }
-    else if (platform == 'win32') {
-        
-    }
+}
+else if (platform == 'win32') {
+
+}
 
 let setweb3token = (token) => {
     let configFile = fs.readFileSync(configpath)
@@ -219,7 +219,7 @@ let processFile = (asset, fileExtension, directoryPath) => {
 
 let publishRawText = (asset, rawText, fileExtension) => {
     fs.writeFileSync("rawText.txt", rawText)
-    const output = execSync('ipfs add rawText.txt --quieter --cid-version 1', { encoding : 'utf-8' });  // the default is 'buffer'
+    const output = execSync('ipfs add rawText.txt --quieter --cid-version 1', { encoding: 'utf-8' });  // the default is 'buffer'
     if (fileExtension == ".thm")
         asset["text"]["/"] = output.substring(0, output.length - 1) // without the final "\n"
     else if (fileExtension == ".sig")
@@ -329,4 +329,4 @@ let main = (mainAssetName, mainAssetType, directoryPath, target) => {
     execSync("rm tmpJSON.json")
 }
 
-module.exports = { main, setweb3token, setgateway, listconfig}
+module.exports = { main, setweb3token, setgateway, listconfig }
