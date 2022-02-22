@@ -42,8 +42,8 @@ else if (platform == 'win32') {
 // try to read ~/.config/w3proof-dispatch/config.json --> create if doesn't exist
 if (fs.existsSync(path)) {
     //file exists
-    let configFile = fs.readFileSync(path)
-    config = JSON.parse(configFile)
+    //let configFile = fs.readFileSync(path)
+    //config = JSON.parse(configFile)
 }
 //console.error(err)
 // file doesn't exist -> create it
