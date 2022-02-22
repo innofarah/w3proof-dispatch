@@ -31,29 +31,30 @@ let confdirpath = ""
 if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos') {
     path = os.homedir() + "/.config/w3proof-dispatch/config.json"
     confdirpath = os.homedir() + '/.config/w3proof-dispatch'
-    // try to read ~/.config/w3proof-dispatch/config.json --> create if doesn't exist
-    try {
-        if (fs.existsSync(path)) {
-            //file exists
-            let configFile = fs.readFileSync(path)
-            config = JSON.parse(configFile)
-        }
-    } catch (err) {
-        //console.error(err)
-        // file doesn't exist -> create it
-        if (!fs.existsSync(path)) {
-            fs.mkdirSync(confdirpath, { recursive: true }) // it creates any directory in the specified path if it does not exist
-
-            let configObj = { "my-gateway": "http://dweb.link", "my-web3.storage-api-token": "**insert your token here**" }
-            fs.writeFileSync(path, JSON.stringify(configObj))
-        }
-    }
 }
 else if (platform == 'darwin') {
 
 }
 else if (platform == 'win32') {
 
+}
+
+// try to read ~/.config/w3proof-dispatch/config.json --> create if doesn't exist
+try {
+    if (fs.existsSync(path)) {
+        //file exists
+        let configFile = fs.readFileSync(path)
+        config = JSON.parse(configFile)
+    }
+} catch (err) {
+    //console.error(err)
+    // file doesn't exist -> create it
+    if (!fs.existsSync(path)) {
+        fs.mkdirSync(confdirpath, { recursive: true }) // it creates any directory in the specified path if it does not exist
+
+        let configObj = { "my-gateway": "http://dweb.link", "my-web3.storage-api-token": "**insert your token here**" }
+        fs.writeFileSync(path, JSON.stringify(configObj))
+    }
 }
 
 

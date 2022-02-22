@@ -8,12 +8,24 @@ let queueGlobal = []
 let publishedObjs = {}
 let config = "", gateway = "", web3Token = "", web3Client = ""
 
+let platform = os.platform()
+    let configpath = ""
+    if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos') {
+        configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
+    }
+    else if (platform == 'darwin') {
+
+    }
+    else if (platform == 'win32') {
+        
+    }
+
 let setweb3token = (token) => {
-    let configFile = fs.readFileSync(os.homedir() + "/.config/w3proof-dispatch/config.json")
+    let configFile = fs.readFileSync(configpath)
     config = JSON.parse(configFile)
     config["my-web3.storage-api-token"] = token
     try {
-        fs.writeFileSync(os.homedir() + "/.config/w3proof-dispatch/config.json", JSON.stringify(config))
+        fs.writeFileSync(configpath, JSON.stringify(config))
     }
     catch (err) {
         console.log(err.message)
@@ -21,14 +33,14 @@ let setweb3token = (token) => {
 }
 
 let setgateway = (gateway) => {
-    let configFile = fs.readFileSync(os.homedir() + "/.config/w3proof-dispatch/config.json")
+    let configFile = fs.readFileSync(configpath)
     config = JSON.parse(configFile)
     config["my-gateway"] = gateway
-    fs.writeFileSync(os.homedir() + "/.config/w3proof-dispatch/config.json", JSON.stringify(config))
+    fs.writeFileSync(configpath, JSON.stringify(config))
 }
 
 let listconfig = () => {
-    let configFile = fs.readFileSync(os.homedir() + "/.config/w3proof-dispatch/config.json")
+    let configFile = fs.readFileSync(configpath)
     config = JSON.parse(configFile)
     console.log(config)
     //Object.entries(config).forEach(element => {
@@ -283,7 +295,7 @@ let publishFinalDag = async (cid) => {
 
 let main = (mainAssetName, mainAssetType, directoryPath, target) => {
     try {
-        let configFile = fs.readFileSync(os.homedir() + "/.config/w3proof-dispatch/config.json")
+        let configFile = fs.readFileSync(configpath)
         config = JSON.parse(configFile)
         if (config["my-gateway"]) gateway = config["my-gateway"]
         else throw (err)
