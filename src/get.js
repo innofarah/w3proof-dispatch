@@ -1,4 +1,4 @@
-const { fs } = require('fs')
+const fs = require('fs')
 const { exec, execSync } = require('child_process')
 const os = require('os')
 
@@ -67,11 +67,14 @@ let mainget = (ipfsPath, directory, ipfsStation) => {
     try {
         let configFile = fs.readFileSync(os.homedir() + "/.config/w3proof-dispatch/config.json")
         config = JSON.parse(configFile)
+       
         if (config["my-gateway"]) gateway = config["my-gateway"]
         else throw (err)
     } catch (err) {
-        console.log("unable to read configuration file, or incorrect format of expected configuration file")
-        process.exit(1)
+        //if (!fs.existsSync(os.homedir() + "/.config/w3proof-dispatch/config.json")) {
+            console.log("unable to read configuration file, or incorrect format of expected configuration file")
+            process.exit(1)
+        //}
     }
 
     if (!(process.argv[2] && process.argv[3])) {
