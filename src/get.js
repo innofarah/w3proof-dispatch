@@ -65,14 +65,11 @@ let constructFile = (ipfsPath, localDirectoryPath) => {
 
 let mainget = (ipfsPath, directory, ipfsStation) => {
 
-    let platform = os.platform()
+    //let platform = os.platform()
     let configpath = ""
-    if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos' || platform == 'darwin') {
-        configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
-    }
-    else if (platform == 'win32') {
-
-    }
+    //if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos' || platform == 'darwin' || platform == 'win32') {
+    configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
+    //}
 
     try {
         let configFile = fs.readFileSync(configpath)

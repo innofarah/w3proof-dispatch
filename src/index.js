@@ -25,16 +25,13 @@ const { config } = require('process')
 // create the configuration file (if it doesn't exist) in the usual configuration location according to different operating systems
 
 
-let platform = os.platform()
+//let platform = os.platform()
 let path = ""
 let confdirpath = ""
-if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos' || platform == 'darwin') {
-    path = os.homedir() + "/.config/w3proof-dispatch/config.json"
-    confdirpath = os.homedir() + '/.config/w3proof-dispatch'
-}
-else if (platform == 'win32') {
-
-}
+//if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos' || platform == 'darwin' || platform == 'win32') {
+path = os.homedir() + "/.config/w3proof-dispatch/config.json"
+confdirpath = os.homedir() + '/.config/w3proof-dispatch'
+//}
 
 // try to read ~/.config/w3proof-dispatch/config.json --> create if doesn't exist
 if (fs.existsSync(path)) {
