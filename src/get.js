@@ -1,6 +1,7 @@
 const fs = require('fs')
 const { exec, execSync } = require('child_process')
 const os = require('os')
+const wget = require('wget-improved');
 
 let config = "", gateway = ""
 
@@ -8,13 +9,26 @@ let importFullDag = (ipfsPath, ipfsStation) => {
     let parts = ipfsPath.split("/")
     let cid = parts[0]
     let cmd = ""
-    if (ipfsStation == "gateway")
-        cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + cid + "' -O tmpdag.car --quiet"
-    else if (ipfsStation == "local")
+    if (ipfsStation == "gateway") {
+        let url =  gateway + "/api/v0/dag/export?arg=" + cid 
+        //cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + cid + "' -O tmpdag.car --quiet"
+        let download = wget.download(url, "tmpdag.car")
+        download.on('end', function() {
+            cmd = "ipfs dag import tmpdag.car"; execSync(cmd)
+            fs.unlink('tmpdag.car', (err) => {
+                if (err) throw err;
+            });
+        });
+    }
+    else if (ipfsStation == "local") {
         cmd = "ipfs dag export " + cid + " > tmpdag.car"
-    execSync(cmd, { encoding: 'utf-8' })
-    cmd = "ipfs dag import tmpdag.car"
-    execSync(cmd)
+        execSync(cmd, { encoding: 'utf-8' })
+        cmd = "ipfs dag import tmpdag.car"
+        execSync(cmd)
+        fs.unlinkSync('tmpdag.car', (err) => {
+            if (err) throw err;
+        });
+    }
 }
 
 let constructFile = (ipfsPath, localDirectoryPath) => {
@@ -98,9 +112,6 @@ let mainget = (ipfsPath, directory, ipfsStation) => {
     importFullDag(ipfsPath, ipfsStation)
 
     constructFile(ipfsPath, directory)
-
-    execSync("rm tmpdag.car")
-
 }
 
 module.exports = { mainget }

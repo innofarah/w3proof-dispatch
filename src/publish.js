@@ -3,6 +3,7 @@ const { exec, execSync } = require('child_process');
 const { Web3Storage, getFilesFromPath } = require('web3.storage');
 const { CarReader } = require('@ipld/car');
 const os = require('os')
+const wget = require('wget-improved');
 
 let queueGlobal = []
 let publishedObjs = {}
@@ -76,16 +77,32 @@ let processFile = (asset, fileExtension, directoryPath) => {
                         if (specName.substring(0, 7) == "ipfs://") {
                             let parts = specName.split("//")
                             let path = parts[parts.length - 1]
-                            let cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + path + "' -O tmpdag.car --quiet"
-                            execSync(cmd, { encoding: 'utf-8' })
-                            cmd = "ipfs dag import tmpdag.car"
-                            execSync(cmd)
-                            execSync("rm tmpdag.car")
-                            execSync("wget '" + gateway + "/api/v0/dag/get" + path + "' --quiet")
-                            let output = JSON.parse(fs.readFileSync(path))
-                            execSync("rm " + path)
-                            asset["specification"] = output["name"]
-                            publishedObjs[output["name"]] = { "/": path }
+                            //let cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + path + "' -O tmpdag.car --quiet"
+                            //execSync(cmd, { encoding: 'utf-8' })
+                            //wget({ url: gateway + "/api/v0/dag/export?arg=" + path, dest: "tmpdag.car" });
+                            let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path, "tmpdag.car")
+                            download.on('end', function () {
+                                cmd = "ipfs dag import tmpdag.car"
+                                execSync(cmd)
+                                //execSync("rm tmpdag.car")
+                                fs.unlink('tmpdag.car', (err) => {
+                                    if (err) throw err;
+                                });
+                                //execSync("wget '" + gateway + "/api/v0/dag/get" + path + "' --quiet")
+                                //wget({ url: gateway + "/api/v0/dag/export?arg=" + path });
+
+                                let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path)
+                                download.on('end', function () {
+                                    let output = JSON.parse(fs.readFileSync(path))
+                                    //execSync("rm " + path)
+                                    fs.unlink(path, (err) => {
+                                        if (err) throw err;
+                                    });
+                                    asset["specification"] = output["name"]
+                                    publishedObjs[output["name"]] = { "/": path }
+                                });
+                            });
+
                         }
                         else {
                             asset["specification"] = specName
@@ -96,16 +113,31 @@ let processFile = (asset, fileExtension, directoryPath) => {
                         if (importedName.substring(0, 7) == "ipfs://") {    // -- Import "ipfs://bafyre.../.../.." --> read the object, and store by its name as stored in the ipfs object
                             let parts = importedName.split("//")
                             let path = parts[parts.length - 1]
-                            let cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + path + "' -O tmpdag.car --quiet"
-                            execSync(cmd, { encoding: 'utf-8' })
-                            cmd = "ipfs dag import tmpdag.car"
-                            execSync(cmd)
-                            execSync("rm tmpdag.car")
-                            execSync("wget '" + gateway + "/api/v0/dag/get/" + path + "' --quiet")
-                            let output = JSON.parse(fs.readFileSync(path))
-                            execSync("rm " + path)
-                            asset["imports"].push(output["name"])
-                            publishedObjs[output["name"]] = { "/": path }
+                            //let cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + path + "' -O tmpdag.car --quiet"
+                            //execSync(cmd, { encoding: 'utf-8' })
+                            //wget({ url: gateway + "/api/v0/dag/export?arg=" + path, dest: "tmpdag.car" });
+
+                            let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path, "tmpdag.car")
+                            download.on('end', function () {
+                                cmd = "ipfs dag import tmpdag.car"
+                                execSync(cmd)
+                                //execSync("rm tmpdag.car")
+                                fs.unlink('tmpdag.car', (err) => {
+                                    if (err) throw err;
+                                });
+                                //execSync("wget '" + gateway + "/api/v0/dag/get/" + path + "' --quiet")
+                                //wget({ url: gateway + "/api/v0/dag/export?arg=" + path });
+                                let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path)
+                                download.on('end', function () {
+                                    let output = JSON.parse(fs.readFileSync(path))
+                                    //execSync("rm " + path)
+                                    fs.unlink(path, (err) => {
+                                        if (err) throw err;
+                                    });
+                                    asset["imports"].push(output["name"])
+                                    publishedObjs[output["name"]] = { "/": path }
+                                });
+                            });
                         }
                         else asset["imports"].push(importedName)
                     }
@@ -165,16 +197,32 @@ let processFile = (asset, fileExtension, directoryPath) => {
                             if (specName.substring(0, 7) == "ipfs://") {
                                 let parts = specName.split("//")
                                 let path = parts[parts.length - 1]
-                                let cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + path + "' -O tmpdag.car --quiet"
-                                execSync(cmd, { encoding: 'utf-8' })
-                                cmd = "ipfs dag import tmpdag.car"
-                                execSync(cmd)
-                                execSync("rm tmpdag.car")
-                                execSync("wget '" + gateway + "/api/v0/dag/get" + path + "' --quiet")
-                                let output = JSON.parse(fs.readFileSync(path))
-                                execSync("rm " + path)
-                                asset["accum"].push(output["name"])
-                                publishedObjs[output["name"]] = { "/": path }
+                                //let cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + path + "' -O tmpdag.car --quiet"
+                                //execSync(cmd, { encoding: 'utf-8' })
+                                //wget({ url: gateway + "/api/v0/dag/export?arg=" + path, dest: "tmpdag.car" });
+
+                                let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path, "tmpdag.car")
+                                download.on('end', function () {
+                                    cmd = "ipfs dag import tmpdag.car"
+                                    execSync(cmd)
+                                    //execSync("rm tmpdag.car")
+                                    fs.unlink('tmpdag.car', (err) => {
+                                        if (err) throw err;
+                                    });
+                                    //execSync("wget '" + gateway + "/api/v0/dag/get" + path + "' --quiet")
+                                    //wget({ url: gateway + "/api/v0/dag/export?arg=" + path });
+
+                                    let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path)
+                                    download.on('end', function () {
+                                        let output = JSON.parse(fs.readFileSync(path))
+                                        //execSync("rm " + path)
+                                        fs.unlink(path, (err) => {
+                                            if (err) throw err;
+                                        });
+                                        asset["accum"].push(output["name"])
+                                        publishedObjs[output["name"]] = { "/": path }
+                                    });
+                                });
                             }
                             else asset["accum"].push(specName)
                         }
@@ -253,8 +301,11 @@ let publish = (current, target) => {
             });
         }
     }
-    let cmd = "echo '" + JSON.stringify(current) + "' > tmpJSON.json"
-    execSync(cmd)
+    //let cmd = "echo '" + JSON.stringify(current) + "' > tmpJSON.json"
+    //execSync(cmd)
+
+    fs.writeFileSync("tmpJSON.json", JSON.stringify(current))
+
     let addcmd = "ipfs dag put tmpJSON.json --pin"
     let output = execSync(addcmd, { encoding: 'utf-8' })
     publishedObjs[current["name"]] = { "/": output.substring(0, output.length - 1) }
@@ -283,7 +334,10 @@ let publishFinalDag = async (cid) => {
     const cid1 = await web3Client.putCar(reader)
     //console.log("Uploaded CAR file to Web3.Storage! CID:", cid1)
     console.log(cid1)
-    execSync("rm tmpcar.car")
+    //execSync("rm tmpcar.car")
+    fs.unlink('tmpcar.car', (err) => {
+        if (err) throw err;
+    });
     //console.log(await web3Client.status(cid1))
 }
 
@@ -319,8 +373,14 @@ let main = (mainAssetName, mainAssetType, directoryPath, target) => {
     let current = queueGlobal.pop()
     publish(current, target)
 
-    execSync("rm rawText.txt")
-    execSync("rm tmpJSON.json")
+    //execSync("rm rawText.txt")
+    //execSync("rm tmpJSON.json")
+    fs.unlink('rawText.txt', (err) => {
+        if (err) throw err;
+    });
+    fs.unlink('tmpJSON.json', (err) => {
+        if (err) throw err;
+    });
 }
 
 module.exports = { main, setweb3token, setgateway, listconfig }
