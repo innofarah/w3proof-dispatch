@@ -10,11 +10,8 @@ let config = "", gateway = "", web3Token = "", web3Client = ""
 
 let platform = os.platform()
 let configpath = ""
-if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos') {
+if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos' || platform == 'darwin') {
     configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
-}
-else if (platform == 'darwin') {
-
 }
 else if (platform == 'win32') {
 
