@@ -28,12 +28,9 @@ const { config } = require('process')
 let platform = os.platform()
 let path = ""
 let confdirpath = ""
-if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos') {
+if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos' || platform == 'darwin') {
     path = os.homedir() + "/.config/w3proof-dispatch/config.json"
     confdirpath = os.homedir() + '/.config/w3proof-dispatch'
-}
-else if (platform == 'darwin') {
-
 }
 else if (platform == 'win32') {
 
@@ -52,7 +49,6 @@ else if (!fs.existsSync(path)) {
     let configObj = { "my-gateway": "http://dweb.link", "my-web3.storage-api-token": "**insert your token here**" }
     fs.writeFileSync(path, JSON.stringify(configObj))
 }
-
 
 
 program
