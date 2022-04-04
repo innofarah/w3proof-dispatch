@@ -19,7 +19,7 @@ const os = require('os')
 const fs = require('fs')
 
 const { mainInterface, setweb3token, setgateway, listconfig, keygen, publishSigned } = require('./publish.js')
-const { mainget } = require('./get.js')
+//const { mainget } = require('./get.js')
 const { inspect_shallow, inspect_in_depth, who_to_trust } = require('./inspect.js')
 const { config } = require('process')
 
@@ -76,10 +76,10 @@ program
     .description('list the configuration parameters - ex: gateway, web3.storage api token')
     .action(listconfig)
 
-program
-    .command('get <ipfsPath> <directory> <ipfsStation>')
-    .description('get the dag object referred to by the specified path, and construct the files referred to in this dag. ipfsStation could be either `local` referring to the local ipfs daemon which should be running in this case, or `gateway` which retreives the files through a remote gateway.')
-    .action(mainget)
+//program
+ //   .command('get <ipfsPath> <directory> <ipfsStation>')
+  //  .description('get the dag object referred to by the specified path, and construct the files referred to in this dag. ipfsStation could be either `local` referring to the local ipfs daemon which should be running in this case, or `gateway` which retreives the files through a remote gateway.')
+  //  .action(mainget)
 
 program
     .command('inspect-shallow <ipfsPath>')

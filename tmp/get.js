@@ -2,6 +2,8 @@ const fs = require('fs')
 const { exec, execSync } = require('child_process')
 const os = require('os')
 const wget = require('wget-improved');
+const crypto = require('crypto')
+
 
 let config = "", gateway = ""
 
@@ -10,10 +12,10 @@ let importFullDag = (ipfsPath, ipfsStation) => {
     let cid = parts[0]
     let cmd = ""
     if (ipfsStation == "gateway") {
-        let url =  gateway + "/api/v0/dag/export?arg=" + cid 
+        let url = gateway + "/api/v0/dag/export?arg=" + cid
         //cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + cid + "' -O tmpdag.car --quiet"
         let download = wget.download(url, "tmpdag.car")
-        download.on('end', function() {
+        download.on('end', function () {
             cmd = "ipfs dag import tmpdag.car"; execSync(cmd)
             fs.unlink('tmpdag.car', (err) => {
                 if (err) throw err;
@@ -36,6 +38,14 @@ let constructFile = (ipfsPath, localDirectoryPath) => {
     let output = execSync(cmd, { encoding: 'utf-8' })
     let asset = JSON.parse(output)
     let fileName = ""
+   /* if (asset["type"] == "signed_script") {
+        const verify = crypto.createVerify('SHA256')
+        verify.write(asset["asset"]["/"]) // we want to verify the assetcid (it is what's assumed to have been signed)
+        verify.end()
+        if(verify.verify(asset['principal'], asset['signature'], 'hex')) {
+            
+        }
+    } */
     if (asset["type"] == "script") {
         fileName = asset["name"] + ".thm"
         let fileContent = ""
@@ -71,10 +81,7 @@ let constructFile = (ipfsPath, localDirectoryPath) => {
         let modFileText = execSync("ipfs cat " + ipfsPath + "/textmod")
         modFileContent += modFileText
         fs.writeFileSync(localDirectoryPath + "/" + modFileName, modFileContent)
-
     }
-
-
 }
 
 let mainget = (ipfsPath, directory, ipfsStation) => {

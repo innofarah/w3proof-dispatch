@@ -4,7 +4,7 @@ const { Web3Storage, getFilesFromPath } = require('web3.storage');
 const { CarReader } = require('@ipld/car');
 const os = require('os')
 const crypto = require('crypto')
-const { strictEqual } = require('assert');
+const { strictEqual, deepStrictEqual } = require('assert');
 const util = require('util')
 const axios = require('axios');
 const { container } = require('webpack');
@@ -97,7 +97,6 @@ let processAsset = async (assetName, assetType, directoryPath) => {
     if (assetType == "abella-script") {
         asset = { "format": "asset", "asset-type": "abella-script", "name": assetName, "specification": "", "imports": [], "text": {} }
         await processAbellaScript(asset, directoryPath)
-        console.log("not waiting 1")
     }
     else if (assetType == "abella-specification") {
         asset = { "format": "asset", "asset-type": "abella-specification", "name": assetName, "accum": [], "textmod": {}, "textsig": {} }
@@ -149,19 +148,15 @@ let processAbellaScript = async (asset, directoryPath) => {
             command = command.trim();
             if (command.substring(0, 13) == "Specification") {
                 await processCommand(command, "specification", asset);
-                console.log("not waiting 3");
             }
             else if (command.substring(0, 6) == "Import") {
-                console.log("before waiting ");
                 await processCommand(command, "import", asset);
-                console.log("not waiting 2");
             }
         }
     }
 
     publishRawText(asset, fileText, ".thm")
     queueGlobal.push(asset)
-    console.log("added asset before processing commands")
 
     for (const importedName of asset["imports"]) {
         if (!publishedObjs[importedName]) {
@@ -187,7 +182,6 @@ let processCommand = async (command, commandType, asset) => {
     if (name.substring(0, 7) == "ipfs://") {
         let parts = name.split("//")
         let path = parts[parts.length - 1]
-        console.log(path)
         await addIpfsLinktoAsset(path, commandType, asset)
     }
     else {
@@ -204,13 +198,19 @@ let processCommand = async (command, commandType, asset) => {
 let addIpfsLinktoAsset = async (path, commandType, asset) => {
     let tmpfilename = path + ".json" // different imports were overlapping with same file name (tmpobj.json) - caused a problem, so use a unique file name for each import
     await getAssetFile(path, tmpfilename)
-    console.log("NOT REACHING HERE")
     let tmpobj = fs.readFileSync(tmpfilename)
     tmpobj = JSON.parse(tmpobj)
     if (commandType == "specification") {
         asset["specification"] = tmpobj["name"]
     }
     else if (commandType == "import") {
+        // cause the process to exit (error) if trying to publish with an invalid assertion link (we do not allow it to exist normally, it should also be detected however when loading files in case a malicious actor publishes an assertion with an invalid signature manually)
+        if (tmpobj["format"] == "assertion") {
+            if (!verifySignature(tmpobj)) {
+                console.log("an invalid assertion link exists in the imports ! Publishing failed.")
+                process.exit()
+            }
+        }
         asset["imports"].push(tmpobj["name"])
     }
     else if (commandType == "accumulate") {
@@ -232,13 +232,13 @@ let getAssetFile = async (path, tmpfilename) => { // creats a tmpobj.json file w
                 cmd = "ipfs dag get " + path + "/asset > " + tmpfilename
                 execSync(cmd, { encoding: 'utf-8' })
             } catch (error) {
-                await axios.get(gateway + "/api/v0/dag/get?arg=" + path + "/asset", tmpfilename)
+                let response = await axios.get(gateway + "/api/v0/dag/get?arg=" + path + "/asset")
+                tmpobj = response.data
+                fs.writeFileSync(tmpfilename, JSON.stringify(response.data))
             }
         }
     } catch (error) {
-        console.log("here " + path)
         let response = await axios.get(gateway + "/api/v0/dag/get?arg=" + path)
-        console.log("response " + response.data)
         tmpobj = response.data
         fs.writeFileSync(tmpfilename, JSON.stringify(response.data))
         if (tmpobj["format"] == "assertion") {
@@ -247,14 +247,12 @@ let getAssetFile = async (path, tmpfilename) => { // creats a tmpobj.json file w
                 execSync(cmd, { encoding: 'utf-8' })
             } catch (error) {
                 try {
-                    await axios.get(gateway + "/api/v0/dag/get?arg=" + tmpobj["asset"]["/"], tmpfilename)
+                    let response = await axios.get(gateway + "/api/v0/dag/get?arg=" + tmpobj["asset"]["/"])
+                    fs.writeFileSync(tmpfilename, JSON.stringify(response.data))
                 } catch (err) {
                     console.log(err)
                 }
             }
-        }
-        else {
-            console.log("here d a e ew wew ")
         }
     }
 }
@@ -328,7 +326,6 @@ let publish = async (current, target, result) => {
 }
 
 let modifyAsset = (assetToModify) => {
-    console.log("modifyasset")
     if (assetToModify["asset-type"] == "abella-script") {
         let text = execSync("ipfs cat " + assetToModify["text"]["/"], { encoding: 'utf-8' })
         assetToModify['imports'].forEach(importedName => {
@@ -423,7 +420,6 @@ let mainInterface = async (mainAssetName, mainAssetType, directoryPath, target) 
     let result = { "value": "" }
     try {
         await main(mainAssetName, mainAssetType, directoryPath, target)
-        console.log(queueGlobal)
         let current = queueGlobal.pop()
         await publish(current, target, result)
         fs.unlink('rawText.txt', (err) => {
@@ -524,6 +520,28 @@ let publishSigned = async (mainAssetName, mainAssetType, directoryPath, target) 
     fs.unlink('tmpJSON.json', (err) => {
         if (err) throw err;
     });
+}
+
+let verifySignature = (assertion) => { // first ensure that this is an assertion format (fix later)
+    try {
+        if (assertion["format"] != "assertion") {
+            throw error
+        }
+        else {
+            let signature = assertion["signature"]
+            let claimedPublicKey = assertion["principal"]
+            // the data to verify : here it's the asset's cid in the object
+            let dataToVerify = assertion["asset"]["/"]
+
+            const verify = crypto.createVerify('SHA256')
+            verify.write(dataToVerify)
+            verify.end()
+            let signatureVerified = verify.verify(claimedPublicKey, signature, 'hex')
+            return signatureVerified
+        }
+    } catch (err) {
+        console.log("wrong format")
+    }
 }
 
 module.exports = { mainInterface, setweb3token, setgateway, listconfig, keygen, publishSigned }
