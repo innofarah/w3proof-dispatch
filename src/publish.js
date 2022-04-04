@@ -4,13 +4,9 @@ const { Web3Storage, getFilesFromPath } = require('web3.storage');
 const { CarReader } = require('@ipld/car');
 const os = require('os')
 const crypto = require('crypto')
-const { strictEqual, deepStrictEqual } = require('assert');
-const util = require('util')
 const axios = require('axios');
-const { container } = require('webpack');
 
 let queueGlobal = []
-let promisesGlobal = []
 let publishedObjs = {}
 let config = "", gateway = "", web3Token = "", web3Client = ""
 
