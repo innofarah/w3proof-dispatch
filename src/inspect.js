@@ -5,7 +5,7 @@ const crypto = require('crypto')
 const os = require('os')
 const util = require('util')
 const stream = require('stream')
-const fetch = require('node-fetch')
+const fetch = require('node-fetch').default
 
 let config, gateway
 let configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
@@ -265,7 +265,7 @@ let verifySignature = (assertion) => { // first ensure that this is an assertion
     }
 }
 
-let ensureFullDAG = async (cid, ipfsStation) => {
+let ensureFullDAG = async (cid) => {
     try {
         //test if it exists locally / or tries to retrieve the missing links in case the ipfs daemon is activated
         let cmd = "ipfs dag export " + cid + " > tmpp.car"
@@ -279,21 +279,25 @@ let ensureFullDAG = async (cid, ipfsStation) => {
         let url = gateway + "/api/v0/dag/export?arg=" + cid
         //let result = await axios.get(url)
         // problem here: we need to return the result as a stream to properly create the .car file from it -> axios not sufficient
-        //let response = await fetch(url)
 
-        const streamPipeline = util.promisify(stream.pipeline);
+        try {
+            const streamPipeline = util.promisify(stream.pipeline);
 
-        const response = await fetch(url);
+            const response = await fetch(url);
 
-        if (!response.ok) throw new Error(`unexpected response ${response.statusText}`);
+            if (!response.ok) throw new Error(`unexpected response ${response.statusText}`);
 
-        await streamPipeline(response.body, fs.createWriteStream('tmpp.car'));
+            await streamPipeline(response.body, fs.createWriteStream('tmpp.car'));
 
-        //fs.writeFileSync("tmpp.car", response.body)
-        execSync("ipfs dag import tmpp.car", { encoding: 'utf-8' })
-        fs.unlink('tmpp.car', (err) => {
-            if (err) throw err;
-        });
+            //fs.writeFileSync("tmpp.car", response.body)
+            execSync("ipfs dag import tmpp.car", { encoding: 'utf-8' })
+            fs.unlink('tmpp.car', (err) => {
+                if (err) throw err;
+            });
+        }catch(err) {
+            console.log(err)
+            process.exit()
+        }
     }
 }
 
