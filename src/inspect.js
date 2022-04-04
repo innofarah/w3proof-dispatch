@@ -2,7 +2,6 @@ const { exec, execSync } = require('child_process');
 const { assert, error } = require('console');
 const fs = require('fs')
 const crypto = require('crypto')
-const axios = require('axios');
 const os = require('os')
 const util = require('util')
 const stream = require('stream')
