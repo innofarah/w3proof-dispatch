@@ -7,6 +7,7 @@ const crypto = require('crypto')
 const { strictEqual } = require('assert');
 const util = require('util')
 const axios = require('axios');
+const { container } = require('webpack');
 
 let queueGlobal = []
 let promisesGlobal = []
@@ -95,16 +96,13 @@ let processAsset = async (assetName, assetType, directoryPath) => {
     let asset = {}
     if (assetType == "abella-script") {
         asset = { "format": "asset", "asset-type": "abella-script", "name": assetName, "specification": "", "imports": [], "text": {} }
-        //processFile(asset, ".thm", directoryPath)
-        return processAbellaScript(asset, directoryPath)
-        //console.log(queueGlobal)
+        await processAbellaScript(asset, directoryPath)
+        console.log("not waiting 1")
     }
     else if (assetType == "abella-specification") {
         asset = { "format": "asset", "asset-type": "abella-specification", "name": assetName, "accum": [], "textmod": {}, "textsig": {} }
-        //processFile(asset, ".sig", directoryPath)
-        //processFile(asset, ".mod", directoryPath)
         // we assume that the files are correctly formatted (both .sig and .mod files are correctly written, and that they exist within the same directory and with the same name (but different extension))
-        return processAbellaSpecification(asset, directoryPath)
+        await processAbellaSpecification(asset, directoryPath)
     }
 }
 
@@ -112,40 +110,31 @@ let processAbellaSpecification = async (asset, directoryPath) => {
     let fileText = fs.readFileSync(directoryPath + "/" + asset["name"] + ".mod").toString() //read accumulations only from .mod file (since they similarly exist (the same) in the .sig file)
     let lines = fileText.split("\n")
 
-    let promises = []
-
-    lines.forEach(line => {
+    for (let line of lines) {
         line.trim()
         let commands = line.split(".")
-        commands.forEach(command => {
+
+        for (let command of commands) {
             command = command.trim()
             if (command.substring(0, 10) == "accumulate") { // in .mod file 
                 // considering that the specification file only accumulates(like imports) specification files
-                promises.push(processCommand(command, "accumulate", asset))
+                await processCommand(command, "accumulate", asset)
             }
-        })
-    });
+        }
+    }
 
-    Promise.allSettled(promises)
-        .then((values) => {
-            publishRawText(asset, fileText, ".mod")
-            let sigFileText = fs.readFileSync(directoryPath + "/" + asset["name"] + ".sig").toString()
-            publishRawText(asset, sigFileText, ".sig")
-        
-            queueGlobal.push(asset)
-        
-            asset["accum"].forEach(accumName => {
-                if (!publishedObjs[accumName]) {
-                    promisesGlobal.push(processAsset(accumName, "abella-specification", directoryPath))
-                }
-            });
-        })
-        .catch(err => {
-            console.log(err)
-        })
+    publishRawText(asset, fileText, ".mod")
+    let sigFileText = fs.readFileSync(directoryPath + "/" + asset["name"] + ".sig").toString()
+    publishRawText(asset, sigFileText, ".sig")
 
-    return Promise.allSettled(promises)
+    queueGlobal.push(asset)
 
+    for (const accumName of asset["accum"]) {
+        if (!publishedObjs[accumName]) {
+            await processAsset(accumName, "abella-specification", directoryPath)
+            //promisesGlobal.push(processAsset(accumName, "abella-specification", directoryPath))
+        }
+    }
 }
 
 
@@ -153,50 +142,37 @@ let processAbellaScript = async (asset, directoryPath) => {
     let fileText = fs.readFileSync(directoryPath + "/" + asset["name"] + ".thm").toString()
     let lines = fileText.split("\n")
 
-    //problem: in case of multiple ipfs imports which are not present in the local cache and they are being retrieved from the gateway -> should wait for all of them 
-
-    let promises = []
-
-    lines.forEach(line => {
-        line.trim()
-        let commands = line.split(".")
-        commands.forEach(command => {
-            command = command.trim()
+    for (let line of lines) {
+        line = line.trim();
+        let commands = line.split(".");
+        for (let command of commands) {
+            command = command.trim();
             if (command.substring(0, 13) == "Specification") {
-                promises.push(processCommand(command, "specification", asset))
+                await processCommand(command, "specification", asset);
+                console.log("not waiting 3");
             }
             else if (command.substring(0, 6) == "Import") {
-                promises.push(processCommand(command, "import", asset))
-                // processCommand should return a promise -> add it to the array of promises -> then promise.all outside the loop
+                console.log("before waiting ");
+                await processCommand(command, "import", asset);
+                console.log("not waiting 2");
             }
-        })
-    });
+        }
+    }
 
-    //console.log(util.inspect(promises, { depth: null }));
+    publishRawText(asset, fileText, ".thm")
+    queueGlobal.push(asset)
+    console.log("added asset before processing commands")
 
-    Promise.allSettled(promises)
-        .then((values) => {
-            publishRawText(asset, fileText, ".thm")
-            queueGlobal.push(asset)
-
-            asset["imports"].forEach(importedName => {
-                if (!publishedObjs[importedName]) {
-                    // not sure (what to do about processAsset here as a promise)
-                    promisesGlobal.push(processAsset(importedName, "abella-script", directoryPath))
-                }
-            });
-            if (asset["specification"]) {
-                if (!publishedObjs[asset["specification"]]) {
-                    promisesGlobal.push(processAsset(asset["specification"], "abella-specification", directoryPath))
-                }
-            }
-        })
-        .catch(err => {
-            console.log(err)
-        })
-
-    return Promise.allSettled(promises)
-
+    for (const importedName of asset["imports"]) {
+        if (!publishedObjs[importedName]) {
+            await processAsset(importedName, "abella-script", directoryPath)
+        }
+    }
+    if (asset["specification"]) {
+        if (!publishedObjs[asset["specification"]]) {
+            await processAsset(asset["specification"], "abella-specification", directoryPath)
+        }
+    }
 }
 
 let processCommand = async (command, commandType, asset) => {
@@ -211,14 +187,14 @@ let processCommand = async (command, commandType, asset) => {
     if (name.substring(0, 7) == "ipfs://") {
         let parts = name.split("//")
         let path = parts[parts.length - 1]
-        return addIpfsLinktoAsset(path, commandType, asset)
+        console.log(path)
+        await addIpfsLinktoAsset(path, commandType, asset)
     }
     else {
         if (commandType == 'specification') asset["specification"] = name
         else if (commandType == "import") asset["imports"].push(name)
         else if (commandType == "accumulate") asset["accum"].push(name)
     }
-    return Promise.resolve()
 }
 
 
@@ -227,34 +203,26 @@ let processCommand = async (command, commandType, asset) => {
 // first get asset/assertion file -> check if format is assertion -> get asset file -> process
 let addIpfsLinktoAsset = async (path, commandType, asset) => {
     let tmpfilename = path + ".json" // different imports were overlapping with same file name (tmpobj.json) - caused a problem, so use a unique file name for each import
-    let p = getAssetFile(path, tmpfilename)
-    p
-        .then(() => {
-
-            let tmpobj = fs.readFileSync(tmpfilename)
-            tmpobj = JSON.parse(tmpobj)
-            if (commandType == "specification") {
-                asset["specification"] = tmpobj["name"]
-            }
-            else if (commandType == "import") {
-                asset["imports"].push(tmpobj["name"])
-            }
-            else if (commandType == "accumulate") {
-                asset["accum"].push(tmpobj["name"])
-            }
-            publishedObjs[tmpobj["name"]] = { "/": path }
-            fs.unlink(tmpfilename, (err) => {
-                if (err) throw err;
-            })
-        })
-        .catch(err => {
-            console.log(err)
-        })
-
-    return p
+    await getAssetFile(path, tmpfilename)
+    console.log("NOT REACHING HERE")
+    let tmpobj = fs.readFileSync(tmpfilename)
+    tmpobj = JSON.parse(tmpobj)
+    if (commandType == "specification") {
+        asset["specification"] = tmpobj["name"]
+    }
+    else if (commandType == "import") {
+        asset["imports"].push(tmpobj["name"])
+    }
+    else if (commandType == "accumulate") {
+        asset["accum"].push(tmpobj["name"])
+    }
+    publishedObjs[tmpobj["name"]] = { "/": path }
+    fs.unlink(tmpfilename, (err) => {
+        if (err) throw err;
+    })
 }
 
-let getAssetFile = (path, tmpfilename) => { // creats a tmpobj.json file which contains the asset's json object
+let getAssetFile = async (path, tmpfilename) => { // creats a tmpobj.json file which contains the asset's json object
     try { // check if the object referred to by 'path' is found locally (or globally if ipfs daemon is running)
         let cmd = "ipfs dag get " + path + " > " + tmpfilename
         execSync(cmd, { encoding: 'utf-8' })
@@ -263,54 +231,31 @@ let getAssetFile = (path, tmpfilename) => { // creats a tmpobj.json file which c
             try {
                 cmd = "ipfs dag get " + path + "/asset > " + tmpfilename
                 execSync(cmd, { encoding: 'utf-8' })
-                return Promise.resolve()
             } catch (error) {
-                let p = axios.get(gateway + "/api/v0/dag/get?arg=" + path + "/asset")
-                p
-                    .then(response => {
-                        fs.writeFileSync(tmpfilename, JSON.stringify(response.data))
-                    })
-                    .catch(err => {
-                        console.log(err)
-                    })
-                return p
+                await axios.get(gateway + "/api/v0/dag/get?arg=" + path + "/asset", tmpfilename)
             }
         }
-        return Promise.resolve()
     } catch (error) {
-        let p = axios.get(gateway + "/api/v0/dag/get?arg=" + path)
-        p
-            .then(async (response) => {
-                tmpobj = response.data
-                if (tmpobj["format"] == "assertion") {
-                    try {
-                        cmd = "ipfs dag get " + tmpobj["asset"]["/"] + " > " + tmpfilename
-                        execSync(cmd, { encoding: 'utf-8' })
-                        //return Promise.resolve()
-                    } catch (error) {
-                        //axios.get(gateway + "/api/v0/dag/get?arg=" + tmpobj["asset"]["/"])
-                        //    .then(response => {
-                        //        fs.writeFileSync(tmpfilename, JSON.stringify(response.data))
-                        //    })
-                        //    .catch(err => {
-                        //        console.log(err)
-                        //    })
-                        try {
-                            await axios.get(gateway + "/api/v0/dag/get?arg=" + tmpobj["asset"]["/"])
-                            fs.writeFileSync(tmpfilename, JSON.stringify(response.data))
-                        }catch(err) {
-                            console.log(err)
-                        }
-                    }
+        console.log("here " + path)
+        let response = await axios.get(gateway + "/api/v0/dag/get?arg=" + path)
+        console.log("response " + response.data)
+        tmpobj = response.data
+        fs.writeFileSync(tmpfilename, JSON.stringify(response.data))
+        if (tmpobj["format"] == "assertion") {
+            try {
+                cmd = "ipfs dag get " + tmpobj["asset"]["/"] + " > " + tmpfilename
+                execSync(cmd, { encoding: 'utf-8' })
+            } catch (error) {
+                try {
+                    await axios.get(gateway + "/api/v0/dag/get?arg=" + tmpobj["asset"]["/"], tmpfilename)
+                } catch (err) {
+                    console.log(err)
                 }
-                else {
-                    fs.writeFileSync(tmpfilename, JSON.stringify(response.data))
-                }
-            })
-            .catch(err => {
-                console.log(err)
-            })
-        return p
+            }
+        }
+        else {
+            console.log("here d a e ew wew ")
+        }
     }
 }
 
@@ -357,15 +302,12 @@ let publish = async (current, target, result) => {
             });
         }
     }
-    //let cmd = "echo '" + JSON.stringify(current) + "' > tmpJSON.json"
-    //execSync(cmd)
 
     fs.writeFileSync("tmpJSON.json", JSON.stringify(current))
 
     let addcmd = "ipfs dag put tmpJSON.json --pin"
     let output = execSync(addcmd, { encoding: 'utf-8' })
     publishedObjs[current["name"]] = { "/": output.substring(0, output.length - 1) }
-    //console.log(publishedObjs)
     // we are sure that the first asset to be published has no imports, so: modify text before publishing the next asset
     if (queueGlobal.length > 0) {
         // once its imports are published, modify the object's/asset's text before publishing it 
@@ -379,21 +321,14 @@ let publish = async (current, target, result) => {
             console.error(err)
             process.exit(1)
         })
-        //result["value"] = output.substring(0, output.length - 1)
     }
     else if (queueGlobal.length == 0 && target.toString() == "local") {
-        //console.log(publishedObjs['fib'])
-        //console.log(output.substring(0, output.length - 1))
         result["value"] = output.substring(0, output.length - 1)
     }
-    //console.log(target)
-
 }
 
 let modifyAsset = (assetToModify) => {
-
-    // now we are only considering the import case (later specification, accumulate, etc.)
-
+    console.log("modifyasset")
     if (assetToModify["asset-type"] == "abella-script") {
         let text = execSync("ipfs cat " + assetToModify["text"]["/"], { encoding: 'utf-8' })
         assetToModify['imports'].forEach(importedName => {
@@ -457,9 +392,6 @@ let modifyAsset = (assetToModify) => {
 
     }
 
-    // console.log("new text")
-    //console.log(text)
-    //console.log(assetToModify)
     return assetToModify
 }
 
@@ -474,8 +406,6 @@ let publishFinalDag = async (cid, result) => {
         const reader = await CarReader.fromIterable(inStream)
         const cid1 = await web3Client.putCar(reader)
         //console.log("Uploaded CAR file to Web3.Storage! CID:", cid1)
-        //console.log(cid1)
-        //execSync("rm tmpcar.car")
         fs.unlink('tmpcar.car', (err) => {
             if (err) throw err;
         });
@@ -486,6 +416,26 @@ let publishFinalDag = async (cid, result) => {
     } catch (err) {
         //console.log(err)
         console.log("Full dag is not present in the local ipfs repository, unable to upload through web3storage as a car file -- for now --> please activate your ipfs daemon and execute your command again in order to try to retrieve the missing links and publish your structure successfully")
+    }
+}
+
+let mainInterface = async (mainAssetName, mainAssetType, directoryPath, target) => {
+    let result = { "value": "" }
+    try {
+        await main(mainAssetName, mainAssetType, directoryPath, target)
+        console.log(queueGlobal)
+        let current = queueGlobal.pop()
+        await publish(current, target, result)
+        fs.unlink('rawText.txt', (err) => {
+            if (err) throw err;
+        });
+        fs.unlink('tmpJSON.json', (err) => {
+            if (err) throw err;
+        });
+        console.log("output " + result["value"])
+        return result["value"]
+    } catch (err) {
+        console.log(err)
     }
 }
 
@@ -513,33 +463,23 @@ let main = async (mainAssetName, mainAssetType, directoryPath, target) => {
         process.exit(1)
     }
 
-    //const mainAssetName = process.argv[2]
-    //const mainAssetType = process.argv[3]
-    //const directoryPath = process.argv[4]
-
-
-    promisesGlobal.push(processAsset(mainAssetName, mainAssetType, directoryPath))
-
-    Promise.allSettled(promisesGlobal)
-        .then(async () => {
-            let current = queueGlobal.pop()
-            let result = { "value": "" }
-            await publish(current, target, result)
-            fs.unlink('rawText.txt', (err) => {
-                if (err) throw err;
-            });
-            fs.unlink('tmpJSON.json', (err) => {
-                if (err) throw err;
-            });
-            console.log("output " + result["value"])
-            return result["value"]
-        })
+    await processAsset(mainAssetName, mainAssetType, directoryPath)
+    console.log("not waiting")
 }
 
 let publishSigned = async (mainAssetName, mainAssetType, directoryPath, target) => {
 
-    let assetcid = await main(mainAssetName, mainAssetType, directoryPath, target)
-    console.log(assetcid)
+    // do not allow signing a specification for now (because it does not mean an assertion)
+    if (mainAssetType == "abella-specification") {
+        console.log("do you know what you are doing?")
+        console.log("command failed :)")
+        process.exit();
+    }
+
+
+    let result = await mainInterface(mainAssetName, mainAssetType, directoryPath, target)
+    let assetcid = result
+
     let configFile = fs.readFileSync(configpath)
     config = JSON.parse(configFile)
     let publicKey = config["public-key"]
@@ -584,20 +524,6 @@ let publishSigned = async (mainAssetName, mainAssetType, directoryPath, target) 
     fs.unlink('tmpJSON.json', (err) => {
         if (err) throw err;
     });
-
-
-    ///////////////////////
-
-    // try to sign some text and then verify it
-    /* const sign = crypto.createSign('SHA256')
-    sign.write('some data to sign')
-    sign.end()
-    const signature = sign.sign(privateKey, 'hex')
- 
-    const verify = crypto.createVerify('SHA256')
-    verify.write('some data to sign')
-    verify.end()
-    console.log(verify.verify(publicKey, signature, 'hex'))*/
 }
 
-module.exports = { main, setweb3token, setgateway, listconfig, keygen, publishSigned }
+module.exports = { mainInterface, setweb3token, setgateway, listconfig, keygen, publishSigned }

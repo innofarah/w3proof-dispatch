@@ -18,8 +18,9 @@ const { program } = require('commander')
 const os = require('os')
 const fs = require('fs')
 
-const { main, setweb3token, setgateway, listconfig, keygen, publishSigned } = require('./publish.js')
+const { mainInterface, setweb3token, setgateway, listconfig, keygen, publishSigned } = require('./publish.js')
 const { mainget } = require('./get.js')
+const { inspect_shallow, inspect_in_depth, who_to_trust } = require('./inspect.js')
 const { config } = require('process')
 
 // create the configuration file (if it doesn't exist) in the usual configuration location according to different operating systems
@@ -54,7 +55,7 @@ program
 program
     .command('publish <mainAssetName> <mainAssetType> <directoryPath> <target>')
     .description('publish a file object with all dependencies to ipfs. <mainAssetName> takes the name of the file without its extension. <mainAssetType> takes either `abella-script` or `abella-specification`. <directoryPath> takes the path of the directory containing the file starting from the directory of execution .<target> takes either `local` to store the constructed objects only locally, or `web3storage` to publish through the web3.storage api')
-    .action(main)
+    .action(mainInterface)
 program
     .command('publish-signed <mainAssetName> <mainAssetType> <directoryPath> <target>')
     .description('Like the normal publish, but with an additional level. First the usual asset object is constructed and published, and then the signature object is published and its cid is returned')
@@ -79,5 +80,20 @@ program
     .command('get <ipfsPath> <directory> <ipfsStation>')
     .description('get the dag object referred to by the specified path, and construct the files referred to in this dag. ipfsStation could be either `local` referring to the local ipfs daemon which should be running in this case, or `gateway` which retreives the files through a remote gateway.')
     .action(mainget)
+
+program
+    .command('inspect-shallow <ipfsPath>')
+    .description('displays the details of the root object referred to by the given ipfs address.')
+    .action(inspect_shallow)
+
+program
+    .command('inspect-in-depth <ipfsPath>')
+    .description('displays details and trust information of the whole dag referred to by the given ipfs address')
+    .action(inspect_in_depth)
+
+program
+    .command('who-to-trust <ipfsPath>')
+    .description('displays the list of the principals you should trust if you want to trust what\'s referred to by the provided cid/address')
+    .action(who_to_trust)
 
 program.parse()
