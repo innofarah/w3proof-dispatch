@@ -3,9 +3,14 @@ const { exec, execSync } = require('child_process');
 const { Web3Storage, getFilesFromPath } = require('web3.storage');
 const { CarReader } = require('@ipld/car');
 const os = require('os')
-const wget = require('wget-improved');
+const crypto = require('crypto')
+const { strictEqual, deepStrictEqual } = require('assert');
+const util = require('util')
+const axios = require('axios');
+const { container } = require('webpack');
 
 let queueGlobal = []
+let promisesGlobal = []
 let publishedObjs = {}
 let config = "", gateway = "", web3Token = "", web3Client = ""
 
@@ -14,6 +19,50 @@ let configpath = ""
 //if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos' || platform == 'darwin' || platform == 'win32') {
 configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
 //}
+
+let keygen = () => { // now just using default parameters
+    /* const {
+        publicKey,
+        privateKey
+    } = crypto.generateKeyPairSync('rsa', {
+        modulusLength : 4096,
+        publicKeyEncoding: {
+            type : 'spki',
+            format : 'pem'
+        },
+        privateKeyEncoding: {
+            type: 'pkcs8',
+            format: 'pem',
+            cipher: 'aes-256-cbc',
+            passphrase: 'top secret'
+        }
+    }) */
+
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', {
+        namedCurve: 'sect239k1',
+        publicKeyEncoding: {
+            type: 'spki',
+            format: 'pem'
+        },
+        privateKeyEncoding: {
+            type: 'pkcs8',
+            format: 'pem'
+        }
+    });
+    //console.log("private key : " + privateKey)
+    //console.log("public key : " + publicKey)
+    // add them to the configuration file: for now 
+    let configFile = fs.readFileSync(configpath)
+    config = JSON.parse(configFile)
+    config["public-key"] = publicKey
+    config["private-key"] = privateKey
+    try {
+        fs.writeFileSync(configpath, JSON.stringify(config))
+    }
+    catch (err) {
+        console.log(err.message)
+    }
+}
 
 let setweb3token = (token) => {
     let configFile = fs.readFileSync(configpath)
@@ -43,221 +92,171 @@ let listconfig = () => {
     //});
 }
 
-let processAsset = (assetName, assetType, directoryPath) => {
+let processAsset = async (assetName, assetType, directoryPath) => {
     let asset = {}
-    if (assetType == "script") {
-        asset = { "type": "script", "name": assetName, "specification": "", "imports": [], "text": {} }
-        processFile(asset, ".thm", directoryPath)
+    if (assetType == "abella-script") {
+        asset = { "format": "asset", "asset-type": "abella-script", "name": assetName, "specification": "", "imports": [], "text": {} }
+        await processAbellaScript(asset, directoryPath)
     }
-    else if (assetType == "specification") {
-        asset = { "type": "specification", "name": assetName, "accum": [], "textmod": {}, "textsig": {} }
-        processFile(asset, ".sig", directoryPath)
-        processFile(asset, ".mod", directoryPath)
+    else if (assetType == "abella-specification") {
+        asset = { "format": "asset", "asset-type": "abella-specification", "name": assetName, "accum": [], "textmod": {}, "textsig": {} }
+        // we assume that the files are correctly formatted (both .sig and .mod files are correctly written, and that they exist within the same directory and with the same name (but different extension))
+        await processAbellaSpecification(asset, directoryPath)
     }
 }
 
-let processFile = (asset, fileExtension, directoryPath) => {
-    let fileText = fs.readFileSync(directoryPath + "/" + asset["name"] + fileExtension).toString()
+let processAbellaSpecification = async (asset, directoryPath) => {
+    let fileText = fs.readFileSync(directoryPath + "/" + asset["name"] + ".mod").toString() //read accumulations only from .mod file (since they similarly exist (the same) in the .sig file)
     let lines = fileText.split("\n")
-    let rawText = ""
-    if (fileExtension == ".thm") {
-        lines.forEach(line => {
-            line.trim()
-            if (line[0] == "%") {
-                // escaping special characters in a comment since they might exist
-                line = line.replace(/[\$"]/g, '\\$&\"');
-                rawText += line
-            } // still have to deal with the /* ... */ comment
-            else {
-                let commands = line.split(".")
-                commands.forEach(command => {
-                    command = command.trim()
-                    if (command.substring(0, 13) == "Specification") {
-                        let specName = command.split("\"")[1]
-                        if (specName.substring(0, 7) == "ipfs://") {
-                            let parts = specName.split("//")
-                            let path = parts[parts.length - 1]
-                            //let cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + path + "' -O tmpdag.car --quiet"
-                            //execSync(cmd, { encoding: 'utf-8' })
-                            //wget({ url: gateway + "/api/v0/dag/export?arg=" + path, dest: "tmpdag.car" });
-                            let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path, "tmpdag.car")
-                            download.on('end', function () {
-                                cmd = "ipfs dag import tmpdag.car"
-                                execSync(cmd)
-                                //execSync("rm tmpdag.car")
-                                fs.unlink('tmpdag.car', (err) => {
-                                    if (err) throw err;
-                                });
-                                //execSync("wget '" + gateway + "/api/v0/dag/get" + path + "' --quiet")
-                                //wget({ url: gateway + "/api/v0/dag/export?arg=" + path });
 
-                                let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path)
-                                download.on('end', function () {
-                                    let output = JSON.parse(fs.readFileSync(path))
-                                    //execSync("rm " + path)
-                                    fs.unlink(path, (err) => {
-                                        if (err) throw err;
-                                    });
-                                    asset["specification"] = output["name"]
-                                    publishedObjs[output["name"]] = { "/": path }
-                                });
-                            });
+    for (let line of lines) {
+        line.trim()
+        let commands = line.split(".")
 
-                        }
-                        else {
-                            asset["specification"] = specName
-                        }
-                    }
-                    else if (command.substring(0, 6) == "Import") {
-                        let importedName = command.split("\"")[1]
-                        if (importedName.substring(0, 7) == "ipfs://") {    // -- Import "ipfs://bafyre.../.../.." --> read the object, and store by its name as stored in the ipfs object
-                            let parts = importedName.split("//")
-                            let path = parts[parts.length - 1]
-                            //let cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + path + "' -O tmpdag.car --quiet"
-                            //execSync(cmd, { encoding: 'utf-8' })
-                            //wget({ url: gateway + "/api/v0/dag/export?arg=" + path, dest: "tmpdag.car" });
-
-                            let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path, "tmpdag.car")
-                            download.on('end', function () {
-                                cmd = "ipfs dag import tmpdag.car"
-                                execSync(cmd)
-                                //execSync("rm tmpdag.car")
-                                fs.unlink('tmpdag.car', (err) => {
-                                    if (err) throw err;
-                                });
-                                //execSync("wget '" + gateway + "/api/v0/dag/get/" + path + "' --quiet")
-                                //wget({ url: gateway + "/api/v0/dag/export?arg=" + path });
-                                let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path)
-                                download.on('end', function () {
-                                    let output = JSON.parse(fs.readFileSync(path))
-                                    //execSync("rm " + path)
-                                    fs.unlink(path, (err) => {
-                                        if (err) throw err;
-                                    });
-                                    asset["imports"].push(output["name"])
-                                    publishedObjs[output["name"]] = { "/": path }
-                                });
-                            });
-                        }
-                        else asset["imports"].push(importedName)
-                    }
-                    else {
-                        if (command != "" && command != "\r\n" && command != "\n") {
-                            line = line.trim()
-                            if (command == line && line[line.length - 1] == ".") {
-                                rawText += command + "."
-                            }
-                            else if (command == line || command == "*/")
-                                rawText += command
-                            else
-                                rawText += command + "."
-                        }
-                    }
-                })
-            }
-            rawText += "\r\n"
-        });
-        publishRawText(asset, rawText, fileExtension)
-
-        queueGlobal.push(asset)
-
-        asset["imports"].forEach(importedName => {
-            if (!publishedObjs[importedName]) {
-                processAsset(importedName, "script", directoryPath)
-            }
-        });
-        if (asset["specification"]) {
-            if (!publishedObjs[asset["specification"]]) {
-                processAsset(asset["specification"], "specification", directoryPath)
+        for (let command of commands) {
+            command = command.trim()
+            if (command.substring(0, 10) == "accumulate") { // in .mod file 
+                // considering that the specification file only accumulates(like imports) specification files
+                await processCommand(command, "accumulate", asset)
             }
         }
     }
-    else if (fileExtension == ".sig" || fileExtension == ".mod") {
-        let modorsiglinefound = false
-        //lines = lines.toString().split("\n")
-        lines.forEach(line => {
-            line.trim()
-            if (line[0] == "%") {
-                // escaping special characters in a comment since they might exist
-                line = line.replace(/[\$"]/g, '\\$&\"');
-                rawText += line
-            } // still have to deal with the /* ... */ comment
-            else if (!modorsiglinefound && (line.substring(0, 6) == "module" || line.substring(0, 3) == "sig")) {
-                modorsiglinefound = true
-                // do nothing (don't add this line to the text to make it easier at the construction step)
-            }
-            else {
-                let commands = line.split(".")
-                commands.forEach(command => {
-                    command = command.trim()
-                    if ((fileExtension == ".sig" && command.substring(0, 9) == "accum_sig")
-                        || (fileExtension == ".mod" && command.substring(0, 10) == "accumulate")) {
-                        if (fileExtension == ".sig") {
-                            let specName = command.split(" ")[1]
-                            if (specName.substring(0, 7) == "ipfs://") {
-                                let parts = specName.split("//")
-                                let path = parts[parts.length - 1]
-                                //let cmd = "wget '" + gateway + "/api/v0/dag/export?arg=" + path + "' -O tmpdag.car --quiet"
-                                //execSync(cmd, { encoding: 'utf-8' })
-                                //wget({ url: gateway + "/api/v0/dag/export?arg=" + path, dest: "tmpdag.car" });
 
-                                let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path, "tmpdag.car")
-                                download.on('end', function () {
-                                    cmd = "ipfs dag import tmpdag.car"
-                                    execSync(cmd)
-                                    //execSync("rm tmpdag.car")
-                                    fs.unlink('tmpdag.car', (err) => {
-                                        if (err) throw err;
-                                    });
-                                    //execSync("wget '" + gateway + "/api/v0/dag/get" + path + "' --quiet")
-                                    //wget({ url: gateway + "/api/v0/dag/export?arg=" + path });
+    publishRawText(asset, fileText, ".mod")
+    let sigFileText = fs.readFileSync(directoryPath + "/" + asset["name"] + ".sig").toString()
+    publishRawText(asset, sigFileText, ".sig")
 
-                                    let download = wget.download(gateway + "/api/v0/dag/export?arg=" + path)
-                                    download.on('end', function () {
-                                        let output = JSON.parse(fs.readFileSync(path))
-                                        //execSync("rm " + path)
-                                        fs.unlink(path, (err) => {
-                                            if (err) throw err;
-                                        });
-                                        asset["accum"].push(output["name"])
-                                        publishedObjs[output["name"]] = { "/": path }
-                                    });
-                                });
-                            }
-                            else asset["accum"].push(specName)
-                        }
-                    }
-                    else {
-                        if (command != "" && command != "\r\n" && command != "\n") {
-                            line = line.trim()
-                            if (command == line && line[line.length - 1] == ".") {
-                                rawText += command + "."
-                            }
-                            else if (command == line || command == "*/")
-                                rawText += command
-                            else
-                                rawText += command + "."
-                        }
-                    }
-                })
-            }
-            rawText += "\r\n"
-        });
-        publishRawText(asset, rawText, fileExtension)
+    queueGlobal.push(asset)
 
-        if (fileExtension == ".sig") { // to add it once to the queue
-            queueGlobal.push(asset)
+    for (const accumName of asset["accum"]) {
+        if (!publishedObjs[accumName]) {
+            await processAsset(accumName, "abella-specification", directoryPath)
+            //promisesGlobal.push(processAsset(accumName, "abella-specification", directoryPath))
         }
-
-        asset["accum"].forEach(accumName => {
-            if (!publishedObjs[accumName] && fileExtension == ".sig") { // to create the asset only once 
-                processAsset(accumName, "specification", directoryPath)
-            }
-        });
     }
-
-
 }
+
+
+let processAbellaScript = async (asset, directoryPath) => {
+    let fileText = fs.readFileSync(directoryPath + "/" + asset["name"] + ".thm").toString()
+    let lines = fileText.split("\n")
+
+    for (let line of lines) {
+        line = line.trim();
+        let commands = line.split(".");
+        for (let command of commands) {
+            command = command.trim();
+            if (command.substring(0, 13) == "Specification") {
+                await processCommand(command, "specification", asset);
+            }
+            else if (command.substring(0, 6) == "Import") {
+                await processCommand(command, "import", asset);
+            }
+        }
+    }
+
+    publishRawText(asset, fileText, ".thm")
+    queueGlobal.push(asset)
+
+    for (const importedName of asset["imports"]) {
+        if (!publishedObjs[importedName]) {
+            await processAsset(importedName, "abella-script", directoryPath)
+        }
+    }
+    if (asset["specification"]) {
+        if (!publishedObjs[asset["specification"]]) {
+            await processAsset(asset["specification"], "abella-specification", directoryPath)
+        }
+    }
+}
+
+let processCommand = async (command, commandType, asset) => {
+    if (commandType == "import" && Object.keys(asset["imports"]).length == 0) asset["imports"] = []
+
+    let delimiter = ""
+    if (commandType == "accumulate") delimiter = " "
+    else delimiter = "\""
+
+    // name : specification or imported name
+    let name = command.split(delimiter)[1]
+    if (name.substring(0, 7) == "ipfs://") {
+        let parts = name.split("//")
+        let path = parts[parts.length - 1]
+        await addIpfsLinktoAsset(path, commandType, asset)
+    }
+    else {
+        if (commandType == 'specification') asset["specification"] = name
+        else if (commandType == "import") asset["imports"].push(name)
+        else if (commandType == "accumulate") asset["accum"].push(name)
+    }
+}
+
+
+
+
+// first get asset/assertion file -> check if format is assertion -> get asset file -> process
+let addIpfsLinktoAsset = async (path, commandType, asset) => {
+    let tmpfilename = path + ".json" // different imports were overlapping with same file name (tmpobj.json) - caused a problem, so use a unique file name for each import
+    await getAssetFile(path, tmpfilename)
+    let tmpobj = fs.readFileSync(tmpfilename)
+    tmpobj = JSON.parse(tmpobj)
+    if (commandType == "specification") {
+        asset["specification"] = tmpobj["name"]
+    }
+    else if (commandType == "import") {
+        // cause the process to exit (error) if trying to publish with an invalid assertion link (we do not allow it to exist normally, it should also be detected however when loading files in case a malicious actor publishes an assertion with an invalid signature manually)
+        if (tmpobj["format"] == "assertion") {
+            if (!verifySignature(tmpobj)) {
+                console.log("an invalid assertion link exists in the imports ! Publishing failed.")
+                process.exit()
+            }
+        }
+        asset["imports"].push(tmpobj["name"])
+    }
+    else if (commandType == "accumulate") {
+        asset["accum"].push(tmpobj["name"])
+    }
+    publishedObjs[tmpobj["name"]] = { "/": path }
+    fs.unlink(tmpfilename, (err) => {
+        if (err) throw err;
+    })
+}
+
+let getAssetFile = async (path, tmpfilename) => { // creats a tmpobj.json file which contains the asset's json object
+    try { // check if the object referred to by 'path' is found locally (or globally if ipfs daemon is running)
+        let cmd = "ipfs dag get " + path + " > " + tmpfilename
+        execSync(cmd, { encoding: 'utf-8' })
+        tmpobj = JSON.parse(fs.readFileSync(tmpfilename))
+        if (tmpobj["format"] == "assertion") {
+            try {
+                cmd = "ipfs dag get " + path + "/asset > " + tmpfilename
+                execSync(cmd, { encoding: 'utf-8' })
+            } catch (error) {
+                let response = await axios.get(gateway + "/api/v0/dag/get?arg=" + path + "/asset")
+                tmpobj = response.data
+                fs.writeFileSync(tmpfilename, JSON.stringify(response.data))
+            }
+        }
+    } catch (error) {
+        let response = await axios.get(gateway + "/api/v0/dag/get?arg=" + path)
+        tmpobj = response.data
+        fs.writeFileSync(tmpfilename, JSON.stringify(response.data))
+        if (tmpobj["format"] == "assertion") {
+            try {
+                cmd = "ipfs dag get " + tmpobj["asset"]["/"] + " > " + tmpfilename
+                execSync(cmd, { encoding: 'utf-8' })
+            } catch (error) {
+                try {
+                    let response = await axios.get(gateway + "/api/v0/dag/get?arg=" + tmpobj["asset"]["/"])
+                    fs.writeFileSync(tmpfilename, JSON.stringify(response.data))
+                } catch (err) {
+                    console.log(err)
+                }
+            }
+        }
+    }
+}
+
 
 let publishRawText = (asset, rawText, fileExtension) => {
     fs.writeFileSync("rawText.txt", rawText)
@@ -271,8 +270,8 @@ let publishRawText = (asset, rawText, fileExtension) => {
 }
 
 // this is a local publish --> adding into the local ipfs space(node)
-let publish = (current, target) => {
-    if (current["type"] == "script") {
+let publish = async (current, target, result) => {
+    if (current["asset-type"] == "abella-script") {
         if (current["imports"].length == 0) {
             current["imports"] = {}
         }
@@ -289,7 +288,7 @@ let publish = (current, target) => {
             current["specification"][specName] = publishedObjs[specName]
         }
     }
-    else if (current["type"] == "specification") {
+    else if (current["asset-type"] == "abella-specification") {
         if (current["accum"].length == 0) {
             current["accum"] = {}
         }
@@ -301,47 +300,142 @@ let publish = (current, target) => {
             });
         }
     }
-    //let cmd = "echo '" + JSON.stringify(current) + "' > tmpJSON.json"
-    //execSync(cmd)
 
     fs.writeFileSync("tmpJSON.json", JSON.stringify(current))
 
     let addcmd = "ipfs dag put tmpJSON.json --pin"
     let output = execSync(addcmd, { encoding: 'utf-8' })
     publishedObjs[current["name"]] = { "/": output.substring(0, output.length - 1) }
-    if (queueGlobal.length > 0) publish(queueGlobal.pop(), target)
+    // we are sure that the first asset to be published has no imports, so: modify text before publishing the next asset
+    if (queueGlobal.length > 0) {
+        // once its imports are published, modify the object's/asset's text before publishing it 
+        let assetToModify = queueGlobal.pop()
+        assetToModify = modifyAsset(assetToModify) // change its text according to the cids of its imports (we know these cids because the imports have been published previously - according to the current implementation according to the global queue)
+        await publish(assetToModify, target, result)
+    }
     // finished
     else if (queueGlobal.length == 0 && target.toString() == "web3storage") {
-        publishFinalDag(output.substring(0, output.length - 1)).catch((err) => {
+        await publishFinalDag(output.substring(0, output.length - 1), result).catch((err) => {
             console.error(err)
             process.exit(1)
         })
     }
     else if (queueGlobal.length == 0 && target.toString() == "local") {
-        console.log(output.substring(0, output.length - 1))
+        result["value"] = output.substring(0, output.length - 1)
     }
-    //console.log(target)
+}
+
+let modifyAsset = (assetToModify) => {
+    if (assetToModify["asset-type"] == "abella-script") {
+        let text = execSync("ipfs cat " + assetToModify["text"]["/"], { encoding: 'utf-8' })
+        assetToModify['imports'].forEach(importedName => {
+            let importedcid = publishedObjs[importedName]['/']
+            // here, for each import, if the import corresponds to a local filename, replace the name with its corresponding cid
+            // then, upload the new text, and replace the text's link cid with the new text cid.
+
+            // either Import "name". or Import "ipfs://cid"
+
+            const regexpImport = new RegExp('Import "' + importedName + '".'); // so, if the import refers to an ipfs address, it won't be matched -> this is only for local imports
+            text = text.replace(regexpImport, 'Import "ipfs://' + importedcid + '".');
+            // for an "import ipfs://cid", the regular expression doesn't match so nothing would happen and the cid would stay
+        });
+
+        // considering that an abella script has only one specification or none
+        if (assetToModify["specification"] != "") {
+            let specificationcid = publishedObjs[assetToModify["specification"]]['/'] // considering that a specification and a script do not have the same name (so fix this later because it is possible)
+            const regexpSpecification = new RegExp('Specification "' + assetToModify["specification"] + '".')
+            text = text.replace(regexpSpecification, 'Specification "ipfs://' + specificationcid + '".')
+        }
+
+        // publish the new text
+        fs.writeFileSync("newText.txt", text)
+        const output = execSync('ipfs add newText.txt --quieter --cid-version 1', { encoding: 'utf-8' });  // the default is 'buffer'
+        assetToModify["text"]["/"] = output.substring(0, output.length - 1)
+
+        fs.unlink('newText.txt', (err) => {
+            if (err) throw err;
+        });
+    }
+    else if (assetToModify["asset-type"] == "abella-specification") {
+        let textmod = execSync("ipfs cat " + assetToModify["textmod"]["/"], { encoding: 'utf-8' })
+        let textsig = execSync("ipfs cat " + assetToModify["textsig"]["/"], { encoding: 'utf-8' })
+
+        //let regexpsig = new RegExp('sig ' + assetToModify["name"])
+        //textsig = textsig.replace(regexpsig, 'sig "ipfs://' + ) !problem here (cycle)
+
+        assetToModify['accum'].forEach(accumulatedName => {
+            let accumulatedcid = publishedObjs[accumulatedName]['/'] //asuming that the file names we are using are unique
+            const regexpsig = new RegExp("accum_sig " + accumulatedName + ".")
+            textsig = textsig.replace(regexpsig, "accum_sig ipfs://" + accumulatedcid + ".")
+            const regexpmod = new RegExp("accumulate " + accumulatedName + ".")
+            textmod = textmod.replace(regexpmod, "accumulate ipfs://" + accumulatedcid + ".")
+        })
+
+        fs.writeFileSync("textsig.txt", textsig)
+        fs.writeFileSync("textmod.txt", textmod)
+
+        let output = execSync('ipfs add textsig.txt --quieter --cid-version 1', { encoding: 'utf-8' });  // the default is 'buffer'
+        assetToModify["textsig"]["/"] = output.substring(0, output.length - 1)
+
+        output = execSync('ipfs add textmod.txt --quieter --cid-version 1', { encoding: 'utf-8' });  // the default is 'buffer'
+        assetToModify["textmod"]["/"] = output.substring(0, output.length - 1)
+
+        fs.unlink('textsig.txt', (err) => {
+            if (err) throw err;
+        });
+        fs.unlink('textmod.txt', (err) => {
+            if (err) throw err;
+        });
+
+    }
+
+    return assetToModify
 }
 
 // this is where the final dag structure is published publicly (through web3.storage api) 
-let publishFinalDag = async (cid) => {
-    let cmd = "ipfs dag export " + cid + " > tmpcar.car"
-    execSync(cmd, { encoding: 'utf-8' })
-    const inStream = fs.createReadStream('tmpcar.car')
-    // read and parse the entire stream in one go, this will cache the contents of
-    // the car in memory so is not suitable for large files.
-    const reader = await CarReader.fromIterable(inStream)
-    const cid1 = await web3Client.putCar(reader)
-    //console.log("Uploaded CAR file to Web3.Storage! CID:", cid1)
-    console.log(cid1)
-    //execSync("rm tmpcar.car")
-    fs.unlink('tmpcar.car', (err) => {
-        if (err) throw err;
-    });
-    //console.log(await web3Client.status(cid1))
+let publishFinalDag = async (cid, result) => {
+    try {
+        let cmd = "ipfs dag export " + cid + " > tmpcar.car"
+        execSync(cmd, { encoding: 'utf-8' })
+        const inStream = fs.createReadStream('tmpcar.car')
+        // read and parse the entire stream in one go, this will cache the contents of
+        // the car in memory so is not suitable for large files.
+        const reader = await CarReader.fromIterable(inStream)
+        const cid1 = await web3Client.putCar(reader)
+        //console.log("Uploaded CAR file to Web3.Storage! CID:", cid1)
+        fs.unlink('tmpcar.car', (err) => {
+            if (err) throw err;
+        });
+        result["value"] = cid1
+        //console.log("result val " + result["value"])
+        //return cid1
+        //console.log(await web3Client.status(cid1))
+    } catch (err) {
+        //console.log(err)
+        console.log("Full dag is not present in the local ipfs repository, unable to upload through web3storage as a car file -- for now --> please activate your ipfs daemon and execute your command again in order to try to retrieve the missing links and publish your structure successfully")
+    }
 }
 
-let main = (mainAssetName, mainAssetType, directoryPath, target) => {
+let mainInterface = async (mainAssetName, mainAssetType, directoryPath, target) => {
+    let result = { "value": "" }
+    try {
+        await main(mainAssetName, mainAssetType, directoryPath, target)
+        let current = queueGlobal.pop()
+        await publish(current, target, result)
+        fs.unlink('rawText.txt', (err) => {
+            if (err) throw err;
+        });
+        fs.unlink('tmpJSON.json', (err) => {
+            if (err) throw err;
+        });
+        console.log("output " + result["value"])
+        return result["value"]
+    } catch (err) {
+        console.log(err)
+    }
+}
+
+let main = async (mainAssetName, mainAssetType, directoryPath, target) => {
     try {
         let configFile = fs.readFileSync(configpath)
         config = JSON.parse(configFile)
@@ -365,22 +459,89 @@ let main = (mainAssetName, mainAssetType, directoryPath, target) => {
         process.exit(1)
     }
 
-    //const mainAssetName = process.argv[2]
-    //const mainAssetType = process.argv[3]
-    //const directoryPath = process.argv[4]
+    await processAsset(mainAssetName, mainAssetType, directoryPath)
+    console.log("not waiting")
+}
 
-    processAsset(mainAssetName, mainAssetType, directoryPath)
-    let current = queueGlobal.pop()
-    publish(current, target)
+let publishSigned = async (mainAssetName, mainAssetType, directoryPath, target) => {
 
-    //execSync("rm rawText.txt")
-    //execSync("rm tmpJSON.json")
-    fs.unlink('rawText.txt', (err) => {
-        if (err) throw err;
-    });
+    // do not allow signing a specification for now (because it does not mean an assertion)
+    if (mainAssetType == "abella-specification") {
+        console.log("do you know what you are doing?")
+        console.log("command failed :)")
+        process.exit();
+    }
+
+
+    let result = await mainInterface(mainAssetName, mainAssetType, directoryPath, target)
+    let assetcid = result
+
+    let configFile = fs.readFileSync(configpath)
+    config = JSON.parse(configFile)
+    let publicKey = config["public-key"]
+    let privateKey = config["private-key"]
+
+    // sign the assetcid
+    const sign = crypto.createSign('SHA256')
+    sign.write(assetcid)
+    sign.end()
+    const signature = sign.sign(privateKey, 'hex')
+
+    let assertion = {
+        "format": "assertion",
+        "principal": publicKey,
+        "asset": { "/": assetcid },
+        "signature": signature
+    }
+
+    console.log(assertion)
+
+    // now we should publish the signature object, and return its cid:
+    // here the signature object can be published directly (still local or web3.storage)
+
+    ////////////////// refactor later
+    fs.writeFileSync("tmpJSON.json", JSON.stringify(assertion))
+
+    let addcmd = "ipfs dag put tmpJSON.json --pin"
+    let output = execSync(addcmd, { encoding: 'utf-8' })
+
+    if (target.toString() == "web3storage") {
+        let result = {}
+        await publishFinalDag(output.substring(0, output.length - 1), result).catch((err) => {
+            console.error(err)
+            process.exit(1)
+        })
+        console.log("the cid of the assertion is " + result["value"])
+    }
+    else if (target.toString() == "local") {
+        console.log("The cid of the assertion is " + output.substring(0, output.length - 1))
+    }
+
     fs.unlink('tmpJSON.json', (err) => {
         if (err) throw err;
     });
 }
 
-module.exports = { main, setweb3token, setgateway, listconfig }
+let verifySignature = (assertion) => { // first ensure that this is an assertion format (fix later)
+    try {
+        if (assertion["format"] != "assertion") {
+            throw error
+        }
+        else {
+            let signature = assertion["signature"]
+            let claimedPublicKey = assertion["principal"]
+            // the data to verify : here it's the asset's cid in the object
+            let dataToVerify = assertion["asset"]["/"]
+
+            const verify = crypto.createVerify('SHA256')
+            verify.write(dataToVerify)
+            verify.end()
+            let signatureVerified = verify.verify(claimedPublicKey, signature, 'hex')
+            return signatureVerified
+        }
+    } catch (err) {
+        console.log("wrong format")
+    }
+}
+
+module.exports = { mainInterface, setweb3token, setgateway, listconfig, keygen, publishSigned }
