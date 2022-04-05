@@ -455,8 +455,17 @@ let main = async (mainAssetName, mainAssetType, directoryPath, target) => {
         process.exit(1)
     }
 
-    await processAsset(mainAssetName, mainAssetType, directoryPath)
-    console.log("not waiting")
+    if(mainAssetType != "abella-script" && mainAssetType != "abella-specification") {
+        console.log("the only supported asset types right now are 'abella-script' or 'abella-specification'")
+        process.exit()
+    }
+
+    try {
+        await processAsset(mainAssetName, mainAssetType, directoryPath)
+    }catch(error) {
+        console.log(error)
+    }
+    
 }
 
 let publishSigned = async (mainAssetName, mainAssetType, directoryPath, target) => {
