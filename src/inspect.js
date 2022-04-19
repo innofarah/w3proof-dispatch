@@ -1,4 +1,4 @@
-const { exec, execSync } = require('child_process');
+const { exec, execSync, execFile } = require('child_process');
 const { assert, error } = require('console');
 const fs = require('fs')
 const crypto = require('crypto')
@@ -294,11 +294,206 @@ let ensureFullDAG = async (cid) => {
             fs.unlink('tmpp.car', (err) => {
                 if (err) throw err;
             });
-        }catch(err) {
+        } catch (err) {
             console.log(err)
             process.exit()
         }
     }
 }
 
-module.exports = { inspect_shallow, inspect_in_depth, who_to_trust }
+// the cid should refer to an assertion or asset format + the asset should refer to an abella-script not specification
+let get_execution = async (cid) => {
+    try {
+        await ensureFullDAG(cid)
+        // after the full dag is ensured to exist locally : 
+
+        let rootObject = execSync("ipfs dag get " + cid, { encoding: 'utf-8' })
+        rootObject = JSON.parse(rootObject)
+        let executionFile = { "text": "" }
+
+        if (rootObject["format"] == "assertion") {
+            // insert skip for all proof scripts in the structure (doesn't matter if there are links to assets, these are considered to be signed/checked implicitly by some assertion (either the root assertion or other) in the structure)
+            let asset = JSON.parse(execSync("ipfs dag get " + cid + "/asset", { encoding: 'utf-8' }))
+            if (asset["asset-type"] != "abella-script") { // for now we only allow this type of asset in get_execution (which is used at import)
+                throw error
+            }
+
+            //rootFileText = execSync("ipfs cat " + cid + "/asset/text", { encoding : 'utf-8' })
+            processImport(asset, executionFile, true) // true corresponds to "skip" which means starting from an assertion
+
+        }
+        else if (rootObject["format"] == "asset") {
+            // consider finding an "assertion" as a stop/separation sign : skip what's after it
+            if (rootObject["asset-type"] != "abella-script") {
+                throw error
+            }
+            processImport(rootObject, executionFile, false)
+        }
+
+        //console.log(executionFile["text"])
+        fs.writeFileSync(cid + ".thm", executionFile["text"])
+
+        who_to_trust(cid)
+
+    } catch (err) {
+        console.log(err)
+    }
+}
+
+// considering that the asset is ensured to be of type "abella-script" (for now)
+// considering now the case where there is no specification
+let processImport = (asset, executionFile, skip) => {
+
+    // !!!CHECK IF TRUE: considering (for now) that the imports exist at the beginning of the file, and that their order does not matter (the imports in the same file do not depend on each other)
+
+    // call this function for each import with skip : true
+
+    try {
+        for (var importedName in asset["imports"]) {
+            let importedObj = JSON.parse(execSync("ipfs dag get " + asset["imports"][importedName]["/"], { encoding: 'utf-8' }))
+            if (importedObj["format"] == "assertion") {
+                importedObj = JSON.parse(execSync("ipfs dag get " + asset["imports"][importedName]["/"] + "/asset", { encoding: 'utf-8' }))
+                processImport(importedObj, executionFile, true)
+            }
+            else if (importedObj["format"] == "asset") {
+                processImport(importedObj, executionFile, skip)
+            }
+            else if (importedObj["format"] != "asset") {
+                throw error
+            }
+
+        }
+
+        // after that, write all the theorems in the file with SKIPS instead of the proof script (if exists) if skip : true, write the scripts otherwise
+
+        //asset(the var) is now an asset format for sure
+        processNonImports(asset, executionFile, skip) // processText
+
+    } catch (err) {
+        console.log(err)
+    }
+}
+
+// considering that it takes only abella-script asset type
+let processNonImports = (asset, executionFile, skip) => {
+    let executionFileText = executionFile["text"]
+
+    try {
+        if (asset["asset-type"] != "abella-script") {
+            throw error
+        }
+
+        let textcid = asset["text"]["/"]
+        let text = execSync("ipfs cat " + textcid, { encoding: 'utf8' })
+        fs.writeFileSync(textcid + ".thm", text)
+        try {
+            execSync("./executables/abella.exe -a " + textcid + ".thm -o " + textcid + ".json", { encoding: 'utf-8' })
+
+            let textjson = JSON.parse(fs.readFileSync(textcid + ".json"))
+            console.log(textjson)
+            fs.unlink(textcid + ".thm", (err) => {
+                if (err) throw err;
+            });
+            fs.unlink(textcid + ".json", (err) => {
+                if (err) throw err;
+            });
+
+        } catch (err) {
+            //console.log(err)
+        }
+
+        //console.log(textjson)
+        /*let inTheorem = false
+        let skipped = false
+
+        let commands = text.split(".");
+        for (let command of commands) {
+            let initialCommand = command
+            command = command.trim();
+
+            if(command[0] == "%") {
+                //console.log("..." + command + "...") 
+                let theCommand = ""
+                lines = command.split("\n")
+                //console.log(lines)
+                lines.forEach(line => {
+                    line = line.trim()
+                    if (line[0] == "%") {
+                        //executionFileText += line + "\n"
+                    }
+                    else if (line != "") {
+                        theCommand += line + "\n"
+                    }
+                });
+                command = theCommand + "\n"
+                //console.log(command)
+            }
+            //console.log("..." + command + "...")
+            if (command.substring(0, 13) == "Specification") {
+                // do not print specification line, considering that only one specification is allowed per file and that the main file which has the imports has it specified
+                //console.log(command)
+            }
+            else if (command.substring(0, 6) == "Import") {
+                // don't put in executiontext - do nothing
+                skipped = false
+            }
+            else if (command.substring(0, 7) == "Theorem") {
+                //console.log(command)
+                executionFileText += initialCommand + ".\n"
+                inTheorem = true
+                skipped = false
+                //console.log(command)
+            }
+            else if (!isTopLevelCommand(command) && inTheorem) { // in the theorem
+                if (skip) {
+                    //console.log(command)
+                    if (!skipped) {
+                        executionFileText += "skip.\n"
+                        skipped = true
+                    }
+                }
+                else {
+                    executionFileText += initialCommand + ".\n"
+                }
+            }
+            else if (isTopLevelCommand(command) && inTheorem) {
+                inTheorem = false
+                skipped = false
+                executionFileText += initialCommand + "."
+            }
+            else if (command == "") {
+                executionFileText += "\n"
+            }
+            else {
+                executionFileText += initialCommand + "."
+            }
+
+        }
+
+        executionFile["text"] = executionFileText
+
+    */
+
+    } catch (err) {
+        console.log(err)
+    }
+}
+
+let isTopLevelCommand = (command) => {
+    // just for a temporary solution
+    //let topLevelCommands = ["Theorem", "Define", "CoDefine", "Specification", "Import", "Query", "Split", "Set", "Show", "Quit", "Close"]
+
+    if (command.startsWith("Theorem") || command.startsWith("Define") || command.startsWith("CoDefine")
+        || command.startsWith("Specification") || command.startsWith("Import") || command.startsWith("Query")
+        || command.startsWith("Split") || command.startsWith("Set") || command.startsWith("Show")
+        || command.startsWith("Quit") || command.startsWith("Close")) {
+
+        return true
+
+    }
+
+    return false
+
+}
+
+module.exports = { inspect_shallow, inspect_in_depth, who_to_trust, ensureFullDAG, get_execution }

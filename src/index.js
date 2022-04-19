@@ -20,7 +20,7 @@ const fs = require('fs')
 
 const { mainInterface, setweb3token, setgateway, listconfig, keygen, publishSigned } = require('./publish.js')
 //const { mainget } = require('./get.js')
-const { inspect_shallow, inspect_in_depth, who_to_trust } = require('./inspect.js')
+const { inspect_shallow, inspect_in_depth, who_to_trust, ensureFullDAG, get_execution } = require('./inspect.js')
 const { config } = require('process')
 
 // create the configuration file (if it doesn't exist) in the usual configuration location according to different operating systems
@@ -77,9 +77,9 @@ program
     .action(listconfig)
 
 //program
- //   .command('get <ipfsPath> <directory> <ipfsStation>')
-  //  .description('get the dag object referred to by the specified path, and construct the files referred to in this dag. ipfsStation could be either `local` referring to the local ipfs daemon which should be running in this case, or `gateway` which retreives the files through a remote gateway.')
-  //  .action(mainget)
+//   .command('get <ipfsPath> <directory> <ipfsStation>')
+//  .description('get the dag object referred to by the specified path, and construct the files referred to in this dag. ipfsStation could be either `local` referring to the local ipfs daemon which should be running in this case, or `gateway` which retreives the files through a remote gateway.')
+//  .action(mainget)
 
 program
     .command('inspect-shallow <ipfsPath>')
@@ -95,5 +95,15 @@ program
     .command('who-to-trust <ipfsPath>')
     .description('displays the list of the principals you should trust if you want to trust what\'s referred to by the provided cid/address')
     .action(who_to_trust)
+
+program
+    .command('import-full-dag <ipfsPath>')
+    .description('ensures that the full dag exists in the local ipfs cache starting from the given cid. If it does not exist locally and the ipfs daemon is not activated, it retrieves it from the gateway.')
+    .action(ensureFullDAG)
+
+program
+    .command('get-execution <ipfsPath>')
+    .description('constructs the file presenting the full execution starting from the given cid considering the existing assertions.')
+    .action(get_execution)
 
 program.parse()
