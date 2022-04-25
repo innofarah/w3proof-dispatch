@@ -5,6 +5,9 @@ const { CarReader } = require('@ipld/car');
 const os = require('os')
 const crypto = require('crypto')
 const axios = require('axios');
+const util = require('util')
+
+const inspect = require('./inspect')
 
 let queueGlobal = []
 let publishedObjs = {}
@@ -91,7 +94,7 @@ let listconfig = () => {
 let processAsset = async (assetName, assetType, directoryPath) => {
     let asset = {}
     if (assetType == "abella-script") {
-        asset = { "format": "asset", "asset-type": "abella-script", "name": assetName, "specification": "", "imports": [], "text": {} }
+        asset = { "format": "asset", "asset-type": "abella-script", "name": assetName, "specification": "", "imports": [], "text": {}, "parsedcontent" : {} }
         await processAbellaScript(asset, directoryPath)
     }
     else if (assetType == "abella-specification") {
@@ -178,6 +181,12 @@ let processCommand = async (command, commandType, asset) => {
     if (name.substring(0, 7) == "ipfs://") {
         let parts = name.split("//")
         let path = parts[parts.length - 1]
+        if (commandType == "import") {
+            await inspect.get_execution(path)
+        }
+        else if (commandType == "specification") {
+            await inspect.get_specification(path)
+        }
         await addIpfsLinktoAsset(path, commandType, asset)
     }
     else {
@@ -188,9 +197,8 @@ let processCommand = async (command, commandType, asset) => {
 }
 
 
-
-
 // first get asset/assertion file -> check if format is assertion -> get asset file -> process
+// FIX THIS : we should check if the given argument 'asset' format (asset or assertion)
 let addIpfsLinktoAsset = async (path, commandType, asset) => {
     let tmpfilename = path + ".json" // different imports were overlapping with same file name (tmpobj.json) - caused a problem, so use a unique file name for each import
     await getAssetFile(path, tmpfilename)
@@ -202,7 +210,7 @@ let addIpfsLinktoAsset = async (path, commandType, asset) => {
     else if (commandType == "import") {
         // cause the process to exit (error) if trying to publish with an invalid assertion link (we do not allow it to exist normally, it should also be detected however when loading files in case a malicious actor publishes an assertion with an invalid signature manually)
         if (tmpobj["format"] == "assertion") {
-            if (!verifySignature(tmpobj)) {
+            if (!inspect.verifySignature(tmpobj)) {
                 console.log("an invalid assertion link exists in the imports ! Publishing failed.")
                 process.exit()
             }
@@ -265,13 +273,38 @@ let publishRawText = (asset, rawText, fileExtension) => {
         asset["textmod"]["/"] = output.substring(0, output.length - 1) // without the final "\n"
 }
 
+let publishParsedContent = (newText) => {
+    let jsonfilename = "neewtext" + ".json"
+    try {
+        fs.writeFileSync("neewtext.thm", newText)
+        
+        execSync("./abella.exe -a neewtext.thm" + " -o " + jsonfilename) // change abella -a to read the cid.thm constructed by invoking get-execution for each import
+
+        const output = execSync("ipfs add " + jsonfilename + " --quieter --cid-version 1", { encoding : 'utf-8' })
+        
+        fs.unlink('neewtext.thm', (err) => {
+            if (err) throw err;
+        });
+
+        fs.unlink('neewtext.json', (err) => {
+            if (err) throw err;
+        });
+        return output
+    }catch(err) {
+        console.log(err)
+    }
+}
+
 // this is a local publish --> adding into the local ipfs space(node)
 let publish = async (current, target, result) => {
+    current = modifyAsset(current)
     if (current["asset-type"] == "abella-script") {
         if (current["imports"].length == 0) {
             current["imports"] = {}
         }
         else {
+            // add parsedcontent to asset (temporary solution)
+            //current = modifyAsset(current)
             let imports = current["imports"]
             current["imports"] = {}
             imports.forEach(importedName => {
@@ -297,8 +330,13 @@ let publish = async (current, target, result) => {
         }
     }
 
+    // problem here : imports is an object not an array (problem with using foreach)
+    //console.log(current)
+    //let importsobject = current["imports"]
+    //console.log(importsobject)
+    //let modified = modifyAsset(current)
+    //console.log(modified)
     fs.writeFileSync("tmpJSON.json", JSON.stringify(current))
-
     let addcmd = "ipfs dag put tmpJSON.json --pin"
     let output = execSync(addcmd, { encoding: 'utf-8' })
     publishedObjs[current["name"]] = { "/": output.substring(0, output.length - 1) }
@@ -306,7 +344,7 @@ let publish = async (current, target, result) => {
     if (queueGlobal.length > 0) {
         // once its imports are published, modify the object's/asset's text before publishing it 
         let assetToModify = queueGlobal.pop()
-        assetToModify = modifyAsset(assetToModify) // change its text according to the cids of its imports (we know these cids because the imports have been published previously - according to the current implementation according to the global queue)
+        //assetToModify = modifyAsset(assetToModify) // change its text according to the cids of its imports (we know these cids because the imports have been published previously - according to the current implementation according to the global queue)
         await publish(assetToModify, target, result)
     }
     // finished
@@ -324,6 +362,7 @@ let publish = async (current, target, result) => {
 let modifyAsset = (assetToModify) => {
     if (assetToModify["asset-type"] == "abella-script") {
         let text = execSync("ipfs cat " + assetToModify["text"]["/"], { encoding: 'utf-8' })
+        let oldtext = text
         assetToModify['imports'].forEach(importedName => {
             let importedcid = publishedObjs[importedName]['/']
             // here, for each import, if the import corresponds to a local filename, replace the name with its corresponding cid
@@ -345,9 +384,48 @@ let modifyAsset = (assetToModify) => {
 
         // publish the new text
         fs.writeFileSync("newText.txt", text)
-        const output = execSync('ipfs add newText.txt --quieter --cid-version 1', { encoding: 'utf-8' });  // the default is 'buffer'
+        let output = execSync('ipfs add newText.txt --quieter --cid-version 1', { encoding: 'utf-8' });  // the default is 'buffer'
         assetToModify["text"]["/"] = output.substring(0, output.length - 1)
 
+        fs.unlink('newText.txt', (err) => {
+            if (err) throw err;
+        });
+
+        // !! MODIFY parsedcontent : local names -> 
+        output = publishParsedContent(oldtext)
+        //console.log("parsedcid " + output)
+        let parsedcontent = JSON.parse(execSync("ipfs cat " + output, { encoding : 'utf-8' }))
+        //console.log(parsedcontent[1])
+        //console.log(publishedObjs)
+        parsedcontent.forEach(command => {
+            if (command["type"] == "top_command" && command["command"].substring(0, 6) == "Import") {
+                let importedName = command["command"].substring(8, command["command"].length - 1)
+                if (importedName.substring(0, 7) == "ipfs://") {
+                    importedName = importedName.substring(7, importedName.length)
+                    importedcid = importedName
+                }
+                else {
+                    importedcid = publishedObjs[importedName]["/"]
+                }
+                command["command"] = 'Import "ipfs://' + importedcid + '"'
+            }
+            else if (command["type"] == "top_command" && command["command"].startsWith("Specification")) {
+                let specName = command["command"].substring(15, command["command"].length - 1)
+                if (specName.substring(0, 7) == "ipfs://") {
+                    specName = specName.substring(7, specName.length)
+                    specificationcid = specName
+                }
+                else {
+                    specificationcid = publishedObjs[specName]["/"]
+                }
+                command["command"] = 'Specification "ipfs://' + specificationcid + '"'
+            }
+        });
+
+        // publish the new parsedcontent
+        fs.writeFileSync("newText.txt", JSON.stringify(parsedcontent))
+        output = execSync('ipfs add newText.txt --quieter --cid-version 1', { encoding: 'utf-8' });  // the default is 'buffer'
+        assetToModify["parsedcontent"]["/"] = output.substring(0, output.length - 1)
         fs.unlink('newText.txt', (err) => {
             if (err) throw err;
         });
@@ -416,6 +494,7 @@ let mainInterface = async (mainAssetName, mainAssetType, directoryPath, target) 
     let result = { "value": "" }
     try {
         await main(mainAssetName, mainAssetType, directoryPath, target)
+        //console.log(queueGlobal)
         let current = queueGlobal.pop()
         await publish(current, target, result)
         fs.unlink('rawText.txt', (err) => {
@@ -527,26 +606,5 @@ let publishSigned = async (mainAssetName, mainAssetType, directoryPath, target) 
     });
 }
 
-let verifySignature = (assertion) => { // first ensure that this is an assertion format (fix later)
-    try {
-        if (assertion["format"] != "assertion") {
-            throw error
-        }
-        else {
-            let signature = assertion["signature"]
-            let claimedPublicKey = assertion["principal"]
-            // the data to verify : here it's the asset's cid in the object
-            let dataToVerify = assertion["asset"]["/"]
-
-            const verify = crypto.createVerify('SHA256')
-            verify.write(dataToVerify)
-            verify.end()
-            let signatureVerified = verify.verify(claimedPublicKey, signature, 'hex')
-            return signatureVerified
-        }
-    } catch (err) {
-        console.log("wrong format")
-    }
-}
 
 module.exports = { mainInterface, setweb3token, setgateway, listconfig, keygen, publishSigned }

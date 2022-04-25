@@ -20,7 +20,7 @@ const fs = require('fs')
 
 const { mainInterface, setweb3token, setgateway, listconfig, keygen, publishSigned } = require('./publish.js')
 //const { mainget } = require('./get.js')
-const { inspect_shallow, inspect_in_depth, who_to_trust, ensureFullDAG, get_execution } = require('./inspect.js')
+const { inspect_shallow, inspect_in_depth, who_to_trust, ensureFullDAG, get_execution, get_specification } = require('./inspect.js')
 const { config } = require('process')
 
 // create the configuration file (if it doesn't exist) in the usual configuration location according to different operating systems
@@ -105,5 +105,10 @@ program
     .command('get-execution <ipfsPath>')
     .description('constructs the file presenting the full execution starting from the given cid considering the existing assertions.')
     .action(get_execution)
+
+program
+    .command('get-specification <ipfsPath>')
+    .description('constructs the final .sig and .mod abella specification files starting from an ipfs cid')
+    .action(get_specification)
 
 program.parse()

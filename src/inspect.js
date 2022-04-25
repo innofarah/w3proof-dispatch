@@ -1,5 +1,5 @@
-const { exec, execSync, execFile } = require('child_process');
-const { assert, error } = require('console');
+const { execSync } = require('child_process');
+const { error } = require('console');
 const fs = require('fs')
 const crypto = require('crypto')
 const os = require('os')
@@ -198,7 +198,6 @@ let processObject = (cid, result) => {
                 result["unsigned"] = true
                 result["unverifiedAssertionsList"][cid] = obj
             }
-
             let asset = execSync("ipfs dag get " + cid + "/asset", { encoding: 'utf-8' })
             asset = JSON.parse(asset)
 
@@ -301,15 +300,97 @@ let ensureFullDAG = async (cid) => {
     }
 }
 
+let get_specification = async (cid) => {
+    try {
+        await ensureFullDAG(cid)
+        let rootObject = JSON.parse(execSync("ipfs dag get " + cid, { encoding: 'utf-8' }))
+        if (!(rootObject["format"] == "asset" && rootObject["asset-type"] == "abella-specification")) {
+            throw (error("Wrong Format !"))
+        }
+        let sigFileText = "sig " + rootObject["name"] + ".\n"
+        let modFileText = "module " + rootObject["name"] + ".\n"
+
+        let specText = { "sigFileText": sigFileText, "modFileText": modFileText }
+
+        Object.keys(rootObject["accum"]).forEach(key => {
+            addAccum(specText, rootObject["accum"][key]["/"])
+        });
+
+        let rootSigText = trimSpecText("sig", execSync("ipfs cat " + rootObject["textsig"]["/"]))
+        let rootModText = trimSpecText("mod", execSync("ipfs cat " + rootObject["textmod"]["/"]))
+
+        specText["sigFileText"] += rootSigText
+        specText["modFileText"] += rootModText
+
+        fs.writeFileSync(cid + ".sig", specText["sigFileText"])
+        fs.writeFileSync(cid + ".mod", specText["modFileText"])
+
+    } catch (err) {
+        console.log(err)
+    }
+}
+
+let addAccum = (specText, cid) => {
+    let accumObj = JSON.parse(execSync("ipfs dag get " + cid, { encoding: 'utf-8' }))
+
+    Object.keys(accumObj["accum"]).forEach(key => {
+        addAccum(specText, accumObj["accum"][key]["/"])
+    });
+
+    let accumSigText = trimSpecText("sig", execSync("ipfs cat " + accumObj["textsig"]["/"]))
+    let accumModText = trimSpecText("mod", execSync("ipfs cat " + accumObj["textmod"]["/"]))
+
+    specText["sigFileText"] += accumSigText
+    specText["modFileText"] += accumModText
+}
+
+let trimSpecText = (fileType, fileText) => {
+    let resultText = ""
+    // still have to deal with the /* */ comment
+    let lines = fileText.toString().split("\n")
+    lines.forEach(line => {
+        line = line.trim()
+        if (line[0] == "%") {
+            resultText += line + "\n"
+        }
+        else if (line[0] != "%") {
+            let commands = line.toString().split(".")
+            commands.forEach(command => {
+                command = command.trim()
+                if (fileType == "sig" && command != "") {
+                    if (command.startsWith("sig") || command.startsWith("accum_sig")) { }
+                    else if (command[0] == "%") {
+                        resultText += command + "\n"
+                    }
+                    else resultText += command + "."
+                }
+                else if (fileType == "mod" && command != "") {
+                    if (command.startsWith("module") || command.startsWith("accumulate")) { }
+                    else if (command.startsWith("%")) {
+                        resultText += command + "\n"
+                    }
+                    else resultText += command + "."
+                }
+            });
+            resultText += "\n"
+        }
+    });
+
+    return resultText
+}
+
+
+let executionFileText = ""
 // the cid should refer to an assertion or asset format + the asset should refer to an abella-script not specification
 let get_execution = async (cid) => {
+    //let executionFile = { "text": "" }
     try {
         await ensureFullDAG(cid)
         // after the full dag is ensured to exist locally : 
 
         let rootObject = execSync("ipfs dag get " + cid, { encoding: 'utf-8' })
+
         rootObject = JSON.parse(rootObject)
-        let executionFile = { "text": "" }
 
         if (rootObject["format"] == "assertion") {
             // insert skip for all proof scripts in the structure (doesn't matter if there are links to assets, these are considered to be signed/checked implicitly by some assertion (either the root assertion or other) in the structure)
@@ -319,7 +400,7 @@ let get_execution = async (cid) => {
             }
 
             //rootFileText = execSync("ipfs cat " + cid + "/asset/text", { encoding : 'utf-8' })
-            processImport(asset, executionFile, true) // true corresponds to "skip" which means starting from an assertion
+            await processAssetExec(asset, true) // true corresponds to "skip" which means starting from an assertion
 
         }
         else if (rootObject["format"] == "asset") {
@@ -327,11 +408,13 @@ let get_execution = async (cid) => {
             if (rootObject["asset-type"] != "abella-script") {
                 throw error
             }
-            processImport(rootObject, executionFile, false)
+            await processAssetExec(rootObject, false)
         }
 
         //console.log(executionFile["text"])
-        fs.writeFileSync(cid + ".thm", executionFile["text"])
+        //console.log(executionFile)
+        //console.log(executionFile["text"])
+        fs.writeFileSync(cid + ".thm", executionFileText)
 
         who_to_trust(cid)
 
@@ -342,158 +425,115 @@ let get_execution = async (cid) => {
 
 // considering that the asset is ensured to be of type "abella-script" (for now)
 // considering now the case where there is no specification
-let processImport = (asset, executionFile, skip) => {
-
-    // !!!CHECK IF TRUE: considering (for now) that the imports exist at the beginning of the file, and that their order does not matter (the imports in the same file do not depend on each other)
-
-    // call this function for each import with skip : true
-
-    try {
-        for (var importedName in asset["imports"]) {
-            let importedObj = JSON.parse(execSync("ipfs dag get " + asset["imports"][importedName]["/"], { encoding: 'utf-8' }))
-            if (importedObj["format"] == "assertion") {
-                importedObj = JSON.parse(execSync("ipfs dag get " + asset["imports"][importedName]["/"] + "/asset", { encoding: 'utf-8' }))
-                processImport(importedObj, executionFile, true)
-            }
-            else if (importedObj["format"] == "asset") {
-                processImport(importedObj, executionFile, skip)
-            }
-            else if (importedObj["format"] != "asset") {
-                throw error
-            }
-
-        }
-
-        // after that, write all the theorems in the file with SKIPS instead of the proof script (if exists) if skip : true, write the scripts otherwise
-
-        //asset(the var) is now an asset format for sure
-        processNonImports(asset, executionFile, skip) // processText
-
-    } catch (err) {
-        console.log(err)
-    }
-}
 
 // considering that it takes only abella-script asset type
-let processNonImports = (asset, executionFile, skip) => {
-    let executionFileText = executionFile["text"]
+let processAssetExec = async (asset, skip) => {
+    // call this function for each import with skip : true/false
+    //asset(the var) is now an asset format for sure
 
     try {
         if (asset["asset-type"] != "abella-script") {
             throw error
         }
 
-        let textcid = asset["text"]["/"]
-        let text = execSync("ipfs cat " + textcid, { encoding: 'utf8' })
-        fs.writeFileSync(textcid + ".thm", text)
-        try {
-            execSync("./executables/abella.exe -a " + textcid + ".thm -o " + textcid + ".json", { encoding: 'utf-8' })
+        if (asset["parsedcontent"] && asset["parsedcontent"]["/"]) {
+            let parsedcontentcid = asset["parsedcontent"]["/"]
+            let commands = JSON.parse(execSync("ipfs cat " + parsedcontentcid, { encoding: "utf-8" }))
 
-            let textjson = JSON.parse(fs.readFileSync(textcid + ".json"))
-            console.log(textjson)
-            fs.unlink(textcid + ".thm", (err) => {
-                if (err) throw err;
-            });
-            fs.unlink(textcid + ".json", (err) => {
-                if (err) throw err;
-            });
+            for (let command of commands) {
+                if (command["type"] == "top_command") {
+                    await processTopCommand(command, skip)
+                    //includes: Theorem, Specification, Import, Define, CoDefine, Query, Split, Set, Show, Quit, Close
+                }
+                else if (command["type"] == "proof_command") {
+                    processProofCommand(command, skip)
+                    // print when !skip
+                }
+                else if (command["type"] == "system_message") {
+                    processSystemMessage(command)
+                    // do not print
+                    // if severity = error -> throw error invalid file 
 
-        } catch (err) {
-            //console.log(err)
-        }
-
-        //console.log(textjson)
-        /*let inTheorem = false
-        let skipped = false
-
-        let commands = text.split(".");
-        for (let command of commands) {
-            let initialCommand = command
-            command = command.trim();
-
-            if(command[0] == "%") {
-                //console.log("..." + command + "...") 
-                let theCommand = ""
-                lines = command.split("\n")
-                //console.log(lines)
-                lines.forEach(line => {
-                    line = line.trim()
-                    if (line[0] == "%") {
-                        //executionFileText += line + "\n"
-                    }
-                    else if (line != "") {
-                        theCommand += line + "\n"
-                    }
-                });
-                command = theCommand + "\n"
-                //console.log(command)
-            }
-            //console.log("..." + command + "...")
-            if (command.substring(0, 13) == "Specification") {
-                // do not print specification line, considering that only one specification is allowed per file and that the main file which has the imports has it specified
-                //console.log(command)
-            }
-            else if (command.substring(0, 6) == "Import") {
-                // don't put in executiontext - do nothing
-                skipped = false
-            }
-            else if (command.substring(0, 7) == "Theorem") {
-                //console.log(command)
-                executionFileText += initialCommand + ".\n"
-                inTheorem = true
-                skipped = false
-                //console.log(command)
-            }
-            else if (!isTopLevelCommand(command) && inTheorem) { // in the theorem
-                if (skip) {
-                    //console.log(command)
-                    if (!skipped) {
-                        executionFileText += "skip.\n"
-                        skipped = true
-                    }
                 }
                 else {
-                    executionFileText += initialCommand + ".\n"
+                    // ?? processOtherCommands(command)
                 }
             }
-            else if (isTopLevelCommand(command) && inTheorem) {
-                inTheorem = false
-                skipped = false
-                executionFileText += initialCommand + "."
-            }
-            else if (command == "") {
-                executionFileText += "\n"
-            }
-            else {
-                executionFileText += initialCommand + "."
-            }
-
         }
-
-        executionFile["text"] = executionFileText
-
-    */
-
     } catch (err) {
         console.log(err)
     }
 }
 
-let isTopLevelCommand = (command) => {
-    // just for a temporary solution
-    //let topLevelCommands = ["Theorem", "Define", "CoDefine", "Specification", "Import", "Query", "Split", "Set", "Show", "Quit", "Close"]
+let processTopCommand = async (command, skip) => {
 
-    if (command.startsWith("Theorem") || command.startsWith("Define") || command.startsWith("CoDefine")
-        || command.startsWith("Specification") || command.startsWith("Import") || command.startsWith("Query")
-        || command.startsWith("Split") || command.startsWith("Set") || command.startsWith("Show")
-        || command.startsWith("Quit") || command.startsWith("Close")) {
+    //let executionFileText = executionFile["text"]
 
-        return true
+    if (command["command"].substring(0, 13) == "Specification") {
+        // construct the specification file [with full accumulations]
+        // the argument is always an ipfs cid (not a local name, since by design we changed local names to cid at publish phase)
+        let specificationcid = command["command"].substring(22, command["command"].length - 1)          
+        await get_specification(specificationcid)
+        executionFileText += command["command"] + ".\n"
+    }
+    else if (command["command"].substring(0, 7) == "Theorem") {
+        // print + print "skip" if skip
+        executionFileText += command["command"] + "."
+        if (skip) {
+            executionFileText += "skip."
+        }
+    }
+    else if (command["command"].substring(0, 6) == "Import") {
+        //console.log(executionFileText)
+        //console.log("------------------------------------------")
+        // process the import here instead of doing so from the asset imports attribute -> imports not only at the beginning of the file would be treated
+        // the argument is always an ipfs cid (by design, at publishing, all links become cids instead of local names)
 
+        let importedcid = command["command"].substring(15, command["command"].length - 1)
+        //console.log("commmanddd " + command["command"])
+        let importedObj = JSON.parse(execSync("ipfs dag get " + importedcid, { encoding: 'utf-8' }))
+        if (importedObj["format"] == "assertion") {
+            importedObj = JSON.parse(execSync("ipfs dag get " + importedcid + "/asset", { encoding: 'utf-8' }))
+            processAssetExec(importedObj, true)
+        }
+        else if (importedObj["format"] == "asset") {
+            //console.log("here")
+            processAssetExec(importedObj, skip)
+        }
+        else if (importedObj["format"] != "asset") {
+            throw error
+        }
+        //console.log(executionFileText)
+        //console.log("----------------------------------")
+    }
+    else {
+        // print other commands
+        executionFileText += command["command"] + "."
     }
 
-    return false
+    //executionFile["text"] = executionFileText
+
+    //console.log(executionFile)
 
 }
 
-module.exports = { inspect_shallow, inspect_in_depth, who_to_trust, ensureFullDAG, get_execution }
+let processProofCommand = (command, skip) => {
+    // print if !skip  
+    //let executionFileText = executionFile["text"]
+    //console.log(executionFileText)
+    //console.log("---------------------------------------------------")
+    if (!skip) {
+        executionFileText += command["command"] + "."
+    }
+    //executionFile["text"] = executionFileText
+}
+
+let processSystemMessage = (command) => {
+    if (command["severity"] == "error") {
+        console.log("not completely valid abella script")
+        // we do not allow to execute/publish in such case for now
+        process.exit(0)
+    }
+}
+
+module.exports = { inspect_shallow, inspect_in_depth, who_to_trust, ensureFullDAG, get_execution, verifySignature, get_specification }
