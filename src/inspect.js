@@ -381,8 +381,10 @@ let trimSpecText = (fileType, fileText) => {
 
 
 let executionFileText = ""
+let spec_detected = { "value": false }
 // the cid should refer to an assertion or asset format + the asset should refer to an abella-script not specification
 let get_execution = async (cid) => {
+    
     //let executionFile = { "text": "" }
     try {
         await ensureFullDAG(cid)
@@ -446,7 +448,7 @@ let processAssetExec = async (asset, skip) => {
                     //includes: Theorem, Specification, Import, Define, CoDefine, Query, Split, Set, Show, Quit, Close
                 }
                 else if (command["type"] == "proof_command") {
-                    processProofCommand(command, skip)
+                    await processProofCommand(command, skip)
                     // print when !skip
                 }
                 else if (command["type"] == "system_message") {
@@ -472,13 +474,18 @@ let processTopCommand = async (command, skip) => {
     if (command["command"].substring(0, 13) == "Specification") {
         // construct the specification file [with full accumulations]
         // the argument is always an ipfs cid (not a local name, since by design we changed local names to cid at publish phase)
-        let specificationcid = command["command"].substring(22, command["command"].length - 1)          
-        await get_specification(specificationcid)
-        executionFileText += command["command"] + ".\n"
+        // the specification should be written only once (there should only be one specification reference according to abella)
+        // ignore specification commands in imported files (redundant) -> this leads to the necessity of having the same cid refer to the same specification used by two different users -> publishing should be deterministic regarding the produced cid
+        if (!spec_detected["value"]) {
+            let specificationcid = command["command"].substring(22, command["command"].length - 1)          
+            await get_specification(specificationcid)
+            executionFileText += command["command"] + ".\n"
+            spec_detected["value"] = true
+        }
     }
     else if (command["command"].substring(0, 7) == "Theorem") {
         // print + print "skip" if skip
-        executionFileText += command["command"] + "."
+        executionFileText += "\n" + command["command"] + ".\n"
         if (skip) {
             executionFileText += "skip."
         }
@@ -494,11 +501,11 @@ let processTopCommand = async (command, skip) => {
         let importedObj = JSON.parse(execSync("ipfs dag get " + importedcid, { encoding: 'utf-8' }))
         if (importedObj["format"] == "assertion") {
             importedObj = JSON.parse(execSync("ipfs dag get " + importedcid + "/asset", { encoding: 'utf-8' }))
-            processAssetExec(importedObj, true)
+            await processAssetExec(importedObj, true)
         }
         else if (importedObj["format"] == "asset") {
             //console.log("here")
-            processAssetExec(importedObj, skip)
+            await processAssetExec(importedObj, skip)
         }
         else if (importedObj["format"] != "asset") {
             throw error
@@ -508,7 +515,7 @@ let processTopCommand = async (command, skip) => {
     }
     else {
         // print other commands
-        executionFileText += command["command"] + "."
+        executionFileText += "\n" + command["command"] + "."
     }
 
     //executionFile["text"] = executionFileText
@@ -517,7 +524,7 @@ let processTopCommand = async (command, skip) => {
 
 }
 
-let processProofCommand = (command, skip) => {
+let processProofCommand = async (command, skip) => {
     // print if !skip  
     //let executionFileText = executionFile["text"]
     //console.log(executionFileText)
