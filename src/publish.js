@@ -11,13 +11,38 @@ const inspect = require('./inspect')
 
 let queueGlobal = []
 let publishedObjs = {}
-let config = "", gateway = "", web3Token = "", web3Client = ""
+let web3Token = "", web3Client = ""
 
-//let platform = os.platform()
-let configpath = ""
-//if (platform == 'freebsd' || platform == 'linux' || platform == 'sunos' || platform == 'darwin' || platform == 'win32') {
-configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
-//}
+let config, gateway, keystore
+let configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
+let keystorepath = os.homedir() + "/.config/w3proof-dispatch/keystore.json"
+
+// remove this later from here and put it in a main function - this check should only be done if the user specified the ipfsstation to be gateway 
+try {
+    // create config.json if it does not exist in the proper directory
+    if (!fs.readFileSync(configpath)) {
+        fs.writeFileSync(configpath, JSON.stringify({}))
+    }
+    else {
+        config = JSON.parse(fs.readFileSync(configpath))
+    }
+
+    // create keystore.json if it does not exist in the proper directory
+    if (!fs.existsSync(keystorepath)) {
+        fs.writeFileSync(keystorepath, JSON.stringify({}))
+    }
+    else {
+        keystore = JSON.parse(fs.readFileSync(keystorepath))
+    }
+
+    if (config["my-gateway"]) gateway = config["my-gateway"]
+    else throw (err)
+
+} catch (err) {
+    console.log(err)
+}
+
+
 
 let keygen = () => { // now just using default parameters
     /* const {
@@ -51,10 +76,10 @@ let keygen = () => { // now just using default parameters
     //console.log("private key : " + privateKey)
     //console.log("public key : " + publicKey)
     // add them to the configuration file: for now 
-    let configFile = fs.readFileSync(configpath)
-    config = JSON.parse(configFile)
     config["public-key"] = publicKey
     config["private-key"] = privateKey
+    let fingerPrint = crypto.createHash('sha256').update(publicKey).digest('hex')
+    config["fingerprint"] = fingerPrint
     try {
         fs.writeFileSync(configpath, JSON.stringify(config))
     }
@@ -79,6 +104,12 @@ let setgateway = (gateway) => {
     let configFile = fs.readFileSync(configpath)
     config = JSON.parse(configFile)
     config["my-gateway"] = gateway
+    fs.writeFileSync(configpath, JSON.stringify(config))
+}
+
+let setAbellaExecutable = (path) => {
+    config = JSON.parse(fs.readFileSync(configpath))
+    config["abella-executable"] = path
     fs.writeFileSync(configpath, JSON.stringify(config))
 }
 
@@ -114,7 +145,7 @@ let processAbellaSpecification = async (asset, directoryPath) => {
 
         for (let command of commands) {
             command = command.trim()
-            if (command.substring(0, 10) == "accumulate") { // in .mod file 
+            if (command.startsWith("accumulate")) { // in .mod file 
                 // considering that the specification file only accumulates(like imports) specification files
                 await processCommand(command, "accumulate", asset)
             }
@@ -145,10 +176,10 @@ let processAbellaScript = async (asset, directoryPath) => {
         let commands = line.split(".");
         for (let command of commands) {
             command = command.trim();
-            if (command.substring(0, 13) == "Specification") {
+            if (command.startsWith("Specification")) {
                 await processCommand(command, "specification", asset);
             }
-            else if (command.substring(0, 6) == "Import") {
+            else if (command.startsWith("Import")) {
                 await processCommand(command, "import", asset);
             }
         }
@@ -178,8 +209,8 @@ let processCommand = async (command, commandType, asset) => {
 
     // name : specification or imported name
     let name = command.split(delimiter)[1]
-    if (name.substring(0, 7) == "ipfs://") {
-        let parts = name.split("//")
+    if (name.startsWith("cid:")) {
+        let parts = name.split(":")
         let path = parts[parts.length - 1]
         if (commandType == "import") {
             await inspect.get_execution(path)
@@ -278,7 +309,7 @@ let publishParsedContent = (newText) => {
     try {
         fs.writeFileSync("neewtext.thm", newText)
         
-        execSync("./abella.exe -a neewtext.thm" + " -o " + jsonfilename) // change abella -a to read the cid.thm constructed by invoking get-execution for each import
+        execSync(config["abella-executable"] + " -a neewtext.thm" + " -o " + jsonfilename) // change abella -a to read the cid.thm constructed by invoking get-execution for each import
 
         const output = execSync("ipfs add " + jsonfilename + " --quieter --cid-version 1", { encoding : 'utf-8' })
         
@@ -371,7 +402,7 @@ let modifyAsset = (assetToModify) => {
             // either Import "name". or Import "ipfs://cid"
 
             const regexpImport = new RegExp('Import "' + importedName + '".'); // so, if the import refers to an ipfs address, it won't be matched -> this is only for local imports
-            text = text.replace(regexpImport, 'Import "ipfs://' + importedcid + '".');
+            text = text.replace(regexpImport, 'Import "cid:' + importedcid + '".');
             // for an "import ipfs://cid", the regular expression doesn't match so nothing would happen and the cid would stay
         });
 
@@ -379,7 +410,7 @@ let modifyAsset = (assetToModify) => {
         if (assetToModify["specification"] != "") {
             let specificationcid = publishedObjs[assetToModify["specification"]]['/'] // considering that a specification and a script do not have the same name (so fix this later because it is possible)
             const regexpSpecification = new RegExp('Specification "' + assetToModify["specification"] + '".')
-            text = text.replace(regexpSpecification, 'Specification "ipfs://' + specificationcid + '".')
+            text = text.replace(regexpSpecification, 'Specification "cid:' + specificationcid + '".')
         }
 
         // publish the new text
@@ -398,27 +429,27 @@ let modifyAsset = (assetToModify) => {
         //console.log(parsedcontent[1])
         //console.log(publishedObjs)
         parsedcontent.forEach(command => {
-            if (command["type"] == "top_command" && command["command"].substring(0, 6) == "Import") {
+            if (command["type"] == "top_command" && command["command"].startsWith("Import")) {
                 let importedName = command["command"].substring(8, command["command"].length - 1)
-                if (importedName.substring(0, 7) == "ipfs://") {
-                    importedName = importedName.substring(7, importedName.length)
+                if (importedName.startsWith("cid:")) {
+                    importedName = importedName.substring(4, importedName.length)
                     importedcid = importedName
                 }
                 else {
                     importedcid = publishedObjs[importedName]["/"]
                 }
-                command["command"] = 'Import "ipfs://' + importedcid + '"'
+                command["command"] = 'Import "cid:' + importedcid + '"'
             }
             else if (command["type"] == "top_command" && command["command"].startsWith("Specification")) {
                 let specName = command["command"].substring(15, command["command"].length - 1)
-                if (specName.substring(0, 7) == "ipfs://") {
-                    specName = specName.substring(7, specName.length)
+                if (specName.startsWith("cid:")) {
+                    specName = specName.substring(4, specName.length)
                     specificationcid = specName
                 }
                 else {
                     specificationcid = publishedObjs[specName]["/"]
                 }
-                command["command"] = 'Specification "ipfs://' + specificationcid + '"'
+                command["command"] = 'Specification "cid:' + specificationcid + '"'
             }
         });
 
@@ -440,9 +471,9 @@ let modifyAsset = (assetToModify) => {
         assetToModify['accum'].forEach(accumulatedName => {
             let accumulatedcid = publishedObjs[accumulatedName]['/'] //asuming that the file names we are using are unique
             const regexpsig = new RegExp("accum_sig " + accumulatedName + ".")
-            textsig = textsig.replace(regexpsig, "accum_sig ipfs://" + accumulatedcid + ".")
+            textsig = textsig.replace(regexpsig, "accum_sig cid:" + accumulatedcid + ".")
             const regexpmod = new RegExp("accumulate " + accumulatedName + ".")
-            textmod = textmod.replace(regexpmod, "accumulate ipfs://" + accumulatedcid + ".")
+            textmod = textmod.replace(regexpmod, "accumulate cid:" + accumulatedcid + ".")
         })
 
         fs.writeFileSync("textsig.txt", textsig)
@@ -577,7 +608,6 @@ let publishSigned = async (mainAssetName, mainAssetType, directoryPath, target) 
         "asset": { "/": assetcid },
         "signature": signature
     }
-
     console.log(assertion)
 
     // now we should publish the signature object, and return its cid:
@@ -607,4 +637,4 @@ let publishSigned = async (mainAssetName, mainAssetType, directoryPath, target) 
 }
 
 
-module.exports = { mainInterface, setweb3token, setgateway, listconfig, keygen, publishSigned }
+module.exports = { mainInterface, setweb3token, setgateway, setAbellaExecutable, listconfig, keygen, publishSigned }

@@ -7,15 +7,31 @@ const util = require('util')
 const stream = require('stream')
 const fetch = require('node-fetch').default
 
-let config, gateway
+let config, gateway, keystore
 let configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
+let keystorepath = os.homedir() + "/.config/w3proof-dispatch/keystore.json"
 
 // remove this later from here and put it in a main function - this check should only be done if the user specified the ipfsstation to be gateway 
 try {
-    let configFile = fs.readFileSync(configpath)
-    config = JSON.parse(configFile)
+    // create config.json if it does not exist in the proper directory
+    if (!fs.readFileSync(configpath)) {
+        fs.writeFileSync(configpath, JSON.stringify({}))
+    }
+    else {
+        config = JSON.parse(fs.readFileSync(configpath))
+    }
+
+    // create keystore.json if it does not exist in the proper directory
+    if (!fs.existsSync(keystorepath)) {
+        fs.writeFileSync(keystorepath, JSON.stringify({}))
+    }
+    else {
+        keystore = JSON.parse(fs.readFileSync(keystorepath))
+    }
+
     if (config["my-gateway"]) gateway = config["my-gateway"]
     else throw (err)
+
 } catch (err) {
     console.log(err)
 }
@@ -94,6 +110,15 @@ let displayAssertion = (assertion) => {
 
     let signature = assertion["signature"]
     let claimedPublicKey = assertion["principal"]
+    let fingerPrint
+    if (keystore[claimedPublicKey]) {
+        fingerPrint = keystore[claimedPublicKey]
+    }
+    else {
+        fingerPrint = crypto.createHash('sha256').update(rootObject["principal"]).digest('hex')
+        keystore[claimedPublicKey] = fingerPrint
+        fs.writeFileSync(keystorepath, JSON.stringify(keystore))
+    }
     // the data to verify : here it's the asset's cid in the object
     let dataToVerify = assertion["asset"]["/"]
 
@@ -107,8 +132,8 @@ let displayAssertion = (assertion) => {
     let dataToDisplay =
         "The provided ipfs path refers to an 'assertion' format. \n" +
         "This assertion is claimed to be produced by the principal " +
-        "of public key: \n" + claimedPublicKey +
-        "It refers to the 'asset' of address " + assertion["asset"]["/"] + "\n"
+        "of public key: \n" + fingerPrint +
+        "\nIt refers to the 'asset' of address " + assertion["asset"]["/"] + "\n"
 
     if (signatureVerified) {
         dataToDisplay += "The provided signature is SUCCESSFULLY verified \n "
@@ -127,7 +152,7 @@ let getAllTrustInfo = async (cid) => {
         // the following is executed if the ensureFullDAG was successfull -> meaning that we are sure that the whole dag we want to read exists in the ipfs local cache to read it in an easier way
 
         let result = {
-            "principalsToTrustList": [],
+            "principalsToTrustList": new Set(),
             "unverifiedAssertionsList": {},
             "verifiedAssertionsList": {},
             "unsignedObjectsList": {},
@@ -158,7 +183,7 @@ let who_to_trust = async (cid) => {
             console.log("The root object referred to by this cid is not of an 'assertion' format, so you do not 'trust it'")
             console.log("However, the principals to be trusted in the rest of the dag are: ")
         }
-        console.log(result["principalsToTrustList"])
+        result["principalsToTrustList"].forEach((value)=>{console.log(value)})
         if (Object.keys(result["unverifiedAssertionsList"]) != 0) {
             // even if we do not allow to publish with an invalid assertion ipfs address, it's better to check because any actor would be able to upload an assertion format object with an invalid signature
             console.log("ATTENTION: this structure contains the following invalid assertions")
@@ -191,7 +216,18 @@ let processObject = (cid, result) => {
 
         if (obj["format"] == "assertion") {
             if (verifySignature(obj)) {
-                result["principalsToTrustList"].push(obj["principal"])
+
+                let fingerPrint
+                if (keystore[obj["principal"]]) {
+                    fingerPrint = keystore[obj["principal"]]
+                } 
+                else {
+                    fingerPrint = crypto.createHash('sha256').update(rootObject["principal"]).digest('hex')
+                    keystore[claimedPublicKey] = fingerPrint
+                    fs.writeFileSync(keystorepath, JSON.stringify(keystore))
+                }
+
+                result["principalsToTrustList"].add(fingerPrint)
                 result["verifiedAssertionsList"][cid] = obj
             }
             else {
@@ -382,9 +418,9 @@ let trimSpecText = (fileType, fileText) => {
 
 let executionFileText = ""
 let spec_detected = { "value": false }
+let keysToTrust = new Set()
 // the cid should refer to an assertion or asset format + the asset should refer to an abella-script not specification
 let get_execution = async (cid) => {
-    
     //let executionFile = { "text": "" }
     try {
         await ensureFullDAG(cid)
@@ -396,13 +432,23 @@ let get_execution = async (cid) => {
 
         if (rootObject["format"] == "assertion") {
             // insert skip for all proof scripts in the structure (doesn't matter if there are links to assets, these are considered to be signed/checked implicitly by some assertion (either the root assertion or other) in the structure)
+
+            keystore = JSON.parse(fs.readFileSync(keystorepath))
+            if (!keystore[rootObject["principal"]]) { // to calculate the fingerprint only once
+                let fingerPrint = crypto.createHash('sha256').update(rootObject["principal"]).digest('hex')
+                keystore[rootObject["principal"]] = fingerPrint
+                fs.writeFileSync(keystorepath, JSON.stringify(keystore))
+            }
+
+            keysToTrust.add(keystore[rootObject["principal"]])
+            
             let asset = JSON.parse(execSync("ipfs dag get " + cid + "/asset", { encoding: 'utf-8' }))
             if (asset["asset-type"] != "abella-script") { // for now we only allow this type of asset in get_execution (which is used at import)
                 throw error
             }
 
             //rootFileText = execSync("ipfs cat " + cid + "/asset/text", { encoding : 'utf-8' })
-            await processAssetExec(asset, true) // true corresponds to "skip" which means starting from an assertion
+            await processAssetExec(asset, true, keystore[rootObject["principal"]]) // true corresponds to "skip" which means starting from an assertion
 
         }
         else if (rootObject["format"] == "asset") {
@@ -410,15 +456,16 @@ let get_execution = async (cid) => {
             if (rootObject["asset-type"] != "abella-script") {
                 throw error
             }
-            await processAssetExec(rootObject, false)
+            await processAssetExec(rootObject, false, keystore[rootObject["principal"]])
         }
 
         //console.log(executionFile["text"])
         //console.log(executionFile)
         //console.log(executionFile["text"])
         fs.writeFileSync(cid + ".thm", executionFileText)
-
-        who_to_trust(cid)
+        
+        //who_to_trust(cid)
+        //console.log(keysToTrust)
 
     } catch (err) {
         console.log(err)
@@ -429,7 +476,7 @@ let get_execution = async (cid) => {
 // considering now the case where there is no specification
 
 // considering that it takes only abella-script asset type
-let processAssetExec = async (asset, skip) => {
+let processAssetExec = async (asset, skip, currentKey) => {
     // call this function for each import with skip : true/false
     //asset(the var) is now an asset format for sure
 
@@ -444,7 +491,7 @@ let processAssetExec = async (asset, skip) => {
 
             for (let command of commands) {
                 if (command["type"] == "top_command") {
-                    await processTopCommand(command, skip)
+                    await processTopCommand(command, skip, currentKey)
                     //includes: Theorem, Specification, Import, Define, CoDefine, Query, Split, Set, Show, Quit, Close
                 }
                 else if (command["type"] == "proof_command") {
@@ -467,45 +514,62 @@ let processAssetExec = async (asset, skip) => {
     }
 }
 
-let processTopCommand = async (command, skip) => {
+let processTopCommand = async (command, skip, currentKey) => {
 
     //let executionFileText = executionFile["text"]
 
-    if (command["command"].substring(0, 13) == "Specification") {
+    if (command["command"].startsWith("Specification")) {
         // construct the specification file [with full accumulations]
         // the argument is always an ipfs cid (not a local name, since by design we changed local names to cid at publish phase)
         // the specification should be written only once (there should only be one specification reference according to abella)
         // ignore specification commands in imported files (redundant) -> this leads to the necessity of having the same cid refer to the same specification used by two different users -> publishing should be deterministic regarding the produced cid
         if (!spec_detected["value"]) {
-            let specificationcid = command["command"].substring(22, command["command"].length - 1)          
+            let specificationcid = command["command"].substring(22, command["command"].length - 1)
             await get_specification(specificationcid)
             executionFileText += command["command"] + ".\n"
             spec_detected["value"] = true
         }
     }
-    else if (command["command"].substring(0, 7) == "Theorem") {
+    else if (command["command"].startsWith("Theorem")) {
         // print + print "skip" if skip
         executionFileText += "\n" + command["command"] + ".\n"
         if (skip) {
-            executionFileText += "skip."
+            executionFileText += "skip. % " + currentKey
         }
     }
-    else if (command["command"].substring(0, 6) == "Import") {
+    else if (command["command"].startsWith("Import")) {
         //console.log(executionFileText)
         //console.log("------------------------------------------")
         // process the import here instead of doing so from the asset imports attribute -> imports not only at the beginning of the file would be treated
         // the argument is always an ipfs cid (by design, at publishing, all links become cids instead of local names)
 
-        let importedcid = command["command"].substring(15, command["command"].length - 1)
+        let importedcid = command["command"].substring(12, command["command"].length - 1)
+
         //console.log("commmanddd " + command["command"])
         let importedObj = JSON.parse(execSync("ipfs dag get " + importedcid, { encoding: 'utf-8' }))
         if (importedObj["format"] == "assertion") {
+            if (!keystore[importedObj["principal"]]) { // to calculate the fingerprint only once
+                let fingerPrint = crypto.createHash('sha256').update(importedObj["principal"]).digest('hex')
+                //console.log(fingerPrint)
+                keystore = JSON.parse(fs.readFileSync(keystorepath))
+                keystore[importedObj["principal"]] = fingerPrint
+                fs.writeFileSync(keystorepath, JSON.stringify(keystore))
+            }
+
+            keysToTrust.add(keystore[importedObj["principal"]])
+            currentKey = keystore[importedObj["principal"]]
+
             importedObj = JSON.parse(execSync("ipfs dag get " + importedcid + "/asset", { encoding: 'utf-8' }))
-            await processAssetExec(importedObj, true)
+
+            /////////////
+
+
+            /////////////
+            await processAssetExec(importedObj, true, currentKey)
         }
         else if (importedObj["format"] == "asset") {
             //console.log("here")
-            await processAssetExec(importedObj, skip)
+            await processAssetExec(importedObj, skip, currentKey)
         }
         else if (importedObj["format"] != "asset") {
             throw error
