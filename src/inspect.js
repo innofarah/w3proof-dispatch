@@ -1,5 +1,5 @@
-const { exec, execSync } = require('child_process');
-const { assert, error } = require('console');
+const { execSync } = require('child_process');
+const { error } = require('console');
 const fs = require('fs')
 const crypto = require('crypto')
 const os = require('os')
@@ -7,15 +7,31 @@ const util = require('util')
 const stream = require('stream')
 const fetch = require('node-fetch').default
 
-let config, gateway
+let config, gateway, keystore
 let configpath = os.homedir() + "/.config/w3proof-dispatch/config.json"
+let keystorepath = os.homedir() + "/.config/w3proof-dispatch/keystore.json"
 
 // remove this later from here and put it in a main function - this check should only be done if the user specified the ipfsstation to be gateway 
 try {
-    let configFile = fs.readFileSync(configpath)
-    config = JSON.parse(configFile)
+    // create config.json if it does not exist in the proper directory
+    if (!fs.readFileSync(configpath)) {
+        fs.writeFileSync(configpath, JSON.stringify({}))
+    }
+    else {
+        config = JSON.parse(fs.readFileSync(configpath))
+    }
+
+    // create keystore.json if it does not exist in the proper directory
+    if (!fs.existsSync(keystorepath)) {
+        fs.writeFileSync(keystorepath, JSON.stringify({}))
+    }
+    else {
+        keystore = JSON.parse(fs.readFileSync(keystorepath))
+    }
+
     if (config["my-gateway"]) gateway = config["my-gateway"]
     else throw (err)
+
 } catch (err) {
     console.log(err)
 }
@@ -94,6 +110,15 @@ let displayAssertion = (assertion) => {
 
     let signature = assertion["signature"]
     let claimedPublicKey = assertion["principal"]
+    let fingerPrint
+    if (keystore[claimedPublicKey]) {
+        fingerPrint = keystore[claimedPublicKey]
+    }
+    else {
+        fingerPrint = crypto.createHash('sha256').update(rootObject["principal"]).digest('hex')
+        keystore[claimedPublicKey] = fingerPrint
+        fs.writeFileSync(keystorepath, JSON.stringify(keystore))
+    }
     // the data to verify : here it's the asset's cid in the object
     let dataToVerify = assertion["asset"]["/"]
 
@@ -107,8 +132,8 @@ let displayAssertion = (assertion) => {
     let dataToDisplay =
         "The provided ipfs path refers to an 'assertion' format. \n" +
         "This assertion is claimed to be produced by the principal " +
-        "of public key: \n" + claimedPublicKey +
-        "It refers to the 'asset' of address " + assertion["asset"]["/"] + "\n"
+        "of public key: \n" + fingerPrint +
+        "\nIt refers to the 'asset' of address " + assertion["asset"]["/"] + "\n"
 
     if (signatureVerified) {
         dataToDisplay += "The provided signature is SUCCESSFULLY verified \n "
@@ -127,7 +152,7 @@ let getAllTrustInfo = async (cid) => {
         // the following is executed if the ensureFullDAG was successfull -> meaning that we are sure that the whole dag we want to read exists in the ipfs local cache to read it in an easier way
 
         let result = {
-            "principalsToTrustList": [],
+            "principalsToTrustList": new Set(),
             "unverifiedAssertionsList": {},
             "verifiedAssertionsList": {},
             "unsignedObjectsList": {},
@@ -158,7 +183,7 @@ let who_to_trust = async (cid) => {
             console.log("The root object referred to by this cid is not of an 'assertion' format, so you do not 'trust it'")
             console.log("However, the principals to be trusted in the rest of the dag are: ")
         }
-        console.log(result["principalsToTrustList"])
+        result["principalsToTrustList"].forEach((value)=>{console.log(value)})
         if (Object.keys(result["unverifiedAssertionsList"]) != 0) {
             // even if we do not allow to publish with an invalid assertion ipfs address, it's better to check because any actor would be able to upload an assertion format object with an invalid signature
             console.log("ATTENTION: this structure contains the following invalid assertions")
@@ -191,14 +216,24 @@ let processObject = (cid, result) => {
 
         if (obj["format"] == "assertion") {
             if (verifySignature(obj)) {
-                result["principalsToTrustList"].push(obj["principal"])
+
+                let fingerPrint
+                if (keystore[obj["principal"]]) {
+                    fingerPrint = keystore[obj["principal"]]
+                } 
+                else {
+                    fingerPrint = crypto.createHash('sha256').update(rootObject["principal"]).digest('hex')
+                    keystore[claimedPublicKey] = fingerPrint
+                    fs.writeFileSync(keystorepath, JSON.stringify(keystore))
+                }
+
+                result["principalsToTrustList"].add(fingerPrint)
                 result["verifiedAssertionsList"][cid] = obj
             }
             else {
                 result["unsigned"] = true
                 result["unverifiedAssertionsList"][cid] = obj
             }
-
             let asset = execSync("ipfs dag get " + cid + "/asset", { encoding: 'utf-8' })
             asset = JSON.parse(asset)
 
@@ -294,11 +329,282 @@ let ensureFullDAG = async (cid) => {
             fs.unlink('tmpp.car', (err) => {
                 if (err) throw err;
             });
-        }catch(err) {
+        } catch (err) {
             console.log(err)
             process.exit()
         }
     }
 }
 
-module.exports = { inspect_shallow, inspect_in_depth, who_to_trust }
+let get_specification = async (cid) => {
+    try {
+        await ensureFullDAG(cid)
+        let rootObject = JSON.parse(execSync("ipfs dag get " + cid, { encoding: 'utf-8' }))
+        if (!(rootObject["format"] == "asset" && rootObject["asset-type"] == "abella-specification")) {
+            throw (error("Wrong Format !"))
+        }
+        let sigFileText = "sig " + rootObject["name"] + ".\n"
+        let modFileText = "module " + rootObject["name"] + ".\n"
+
+        let specText = { "sigFileText": sigFileText, "modFileText": modFileText }
+
+        Object.keys(rootObject["accum"]).forEach(key => {
+            addAccum(specText, rootObject["accum"][key]["/"])
+        });
+
+        let rootSigText = trimSpecText("sig", execSync("ipfs cat " + rootObject["textsig"]["/"]))
+        let rootModText = trimSpecText("mod", execSync("ipfs cat " + rootObject["textmod"]["/"]))
+
+        specText["sigFileText"] += rootSigText
+        specText["modFileText"] += rootModText
+
+        fs.writeFileSync(cid + ".sig", specText["sigFileText"])
+        fs.writeFileSync(cid + ".mod", specText["modFileText"])
+
+    } catch (err) {
+        console.log(err)
+    }
+}
+
+let addAccum = (specText, cid) => {
+    let accumObj = JSON.parse(execSync("ipfs dag get " + cid, { encoding: 'utf-8' }))
+
+    Object.keys(accumObj["accum"]).forEach(key => {
+        addAccum(specText, accumObj["accum"][key]["/"])
+    });
+
+    let accumSigText = trimSpecText("sig", execSync("ipfs cat " + accumObj["textsig"]["/"]))
+    let accumModText = trimSpecText("mod", execSync("ipfs cat " + accumObj["textmod"]["/"]))
+
+    specText["sigFileText"] += accumSigText
+    specText["modFileText"] += accumModText
+}
+
+let trimSpecText = (fileType, fileText) => {
+    let resultText = ""
+    // still have to deal with the /* */ comment
+    let lines = fileText.toString().split("\n")
+    lines.forEach(line => {
+        line = line.trim()
+        if (line[0] == "%") {
+            resultText += line + "\n"
+        }
+        else if (line[0] != "%") {
+            let commands = line.toString().split(".")
+            commands.forEach(command => {
+                command = command.trim()
+                if (fileType == "sig" && command != "") {
+                    if (command.startsWith("sig") || command.startsWith("accum_sig")) { }
+                    else if (command[0] == "%") {
+                        resultText += command + "\n"
+                    }
+                    else resultText += command + "."
+                }
+                else if (fileType == "mod" && command != "") {
+                    if (command.startsWith("module") || command.startsWith("accumulate")) { }
+                    else if (command.startsWith("%")) {
+                        resultText += command + "\n"
+                    }
+                    else resultText += command + "."
+                }
+            });
+            resultText += "\n"
+        }
+    });
+
+    return resultText
+}
+
+
+let executionFileText = ""
+let spec_detected = { "value": false }
+let keysToTrust = new Set()
+// the cid should refer to an assertion or asset format + the asset should refer to an abella-script not specification
+let get_execution = async (cid) => {
+    //let executionFile = { "text": "" }
+    try {
+        await ensureFullDAG(cid)
+        // after the full dag is ensured to exist locally : 
+
+        let rootObject = execSync("ipfs dag get " + cid, { encoding: 'utf-8' })
+
+        rootObject = JSON.parse(rootObject)
+
+        if (rootObject["format"] == "assertion") {
+            // insert skip for all proof scripts in the structure (doesn't matter if there are links to assets, these are considered to be signed/checked implicitly by some assertion (either the root assertion or other) in the structure)
+
+            keystore = JSON.parse(fs.readFileSync(keystorepath))
+            if (!keystore[rootObject["principal"]]) { // to calculate the fingerprint only once
+                let fingerPrint = crypto.createHash('sha256').update(rootObject["principal"]).digest('hex')
+                keystore[rootObject["principal"]] = fingerPrint
+                fs.writeFileSync(keystorepath, JSON.stringify(keystore))
+            }
+
+            keysToTrust.add(keystore[rootObject["principal"]])
+            
+            let asset = JSON.parse(execSync("ipfs dag get " + cid + "/asset", { encoding: 'utf-8' }))
+            if (asset["asset-type"] != "abella-script") { // for now we only allow this type of asset in get_execution (which is used at import)
+                throw error
+            }
+
+            //rootFileText = execSync("ipfs cat " + cid + "/asset/text", { encoding : 'utf-8' })
+            await processAssetExec(asset, true, keystore[rootObject["principal"]]) // true corresponds to "skip" which means starting from an assertion
+
+        }
+        else if (rootObject["format"] == "asset") {
+            // consider finding an "assertion" as a stop/separation sign : skip what's after it
+            if (rootObject["asset-type"] != "abella-script") {
+                throw error
+            }
+            await processAssetExec(rootObject, false, keystore[rootObject["principal"]])
+        }
+
+        //console.log(executionFile["text"])
+        //console.log(executionFile)
+        //console.log(executionFile["text"])
+        fs.writeFileSync(cid + ".thm", executionFileText)
+        
+        //who_to_trust(cid)
+        //console.log(keysToTrust)
+
+    } catch (err) {
+        console.log(err)
+    }
+}
+
+// considering that the asset is ensured to be of type "abella-script" (for now)
+// considering now the case where there is no specification
+
+// considering that it takes only abella-script asset type
+let processAssetExec = async (asset, skip, currentKey) => {
+    // call this function for each import with skip : true/false
+    //asset(the var) is now an asset format for sure
+
+    try {
+        if (asset["asset-type"] != "abella-script") {
+            throw error
+        }
+
+        if (asset["parsedcontent"] && asset["parsedcontent"]["/"]) {
+            let parsedcontentcid = asset["parsedcontent"]["/"]
+            let commands = JSON.parse(execSync("ipfs cat " + parsedcontentcid, { encoding: "utf-8" }))
+
+            for (let command of commands) {
+                if (command["type"] == "top_command") {
+                    await processTopCommand(command, skip, currentKey)
+                    //includes: Theorem, Specification, Import, Define, CoDefine, Query, Split, Set, Show, Quit, Close
+                }
+                else if (command["type"] == "proof_command") {
+                    await processProofCommand(command, skip)
+                    // print when !skip
+                }
+                else if (command["type"] == "system_message") {
+                    processSystemMessage(command)
+                    // do not print
+                    // if severity = error -> throw error invalid file 
+
+                }
+                else {
+                    // ?? processOtherCommands(command)
+                }
+            }
+        }
+    } catch (err) {
+        console.log(err)
+    }
+}
+
+let processTopCommand = async (command, skip, currentKey) => {
+
+    //let executionFileText = executionFile["text"]
+
+    if (command["command"].startsWith("Specification")) {
+        // construct the specification file [with full accumulations]
+        // the argument is always an ipfs cid (not a local name, since by design we changed local names to cid at publish phase)
+        // the specification should be written only once (there should only be one specification reference according to abella)
+        // ignore specification commands in imported files (redundant) -> this leads to the necessity of having the same cid refer to the same specification used by two different users -> publishing should be deterministic regarding the produced cid
+        if (!spec_detected["value"]) {
+            let specificationcid = command["command"].substring(22, command["command"].length - 1)
+            await get_specification(specificationcid)
+            executionFileText += command["command"] + ".\n"
+            spec_detected["value"] = true
+        }
+    }
+    else if (command["command"].startsWith("Theorem")) {
+        // print + print "skip" if skip
+        executionFileText += "\n" + command["command"] + ".\n"
+        if (skip) {
+            executionFileText += "skip. % " + currentKey
+        }
+    }
+    else if (command["command"].startsWith("Import")) {
+        //console.log(executionFileText)
+        //console.log("------------------------------------------")
+        // process the import here instead of doing so from the asset imports attribute -> imports not only at the beginning of the file would be treated
+        // the argument is always an ipfs cid (by design, at publishing, all links become cids instead of local names)
+
+        let importedcid = command["command"].substring(12, command["command"].length - 1)
+
+        //console.log("commmanddd " + command["command"])
+        let importedObj = JSON.parse(execSync("ipfs dag get " + importedcid, { encoding: 'utf-8' }))
+        if (importedObj["format"] == "assertion") {
+            if (!keystore[importedObj["principal"]]) { // to calculate the fingerprint only once
+                let fingerPrint = crypto.createHash('sha256').update(importedObj["principal"]).digest('hex')
+                //console.log(fingerPrint)
+                keystore = JSON.parse(fs.readFileSync(keystorepath))
+                keystore[importedObj["principal"]] = fingerPrint
+                fs.writeFileSync(keystorepath, JSON.stringify(keystore))
+            }
+
+            keysToTrust.add(keystore[importedObj["principal"]])
+            currentKey = keystore[importedObj["principal"]]
+
+            importedObj = JSON.parse(execSync("ipfs dag get " + importedcid + "/asset", { encoding: 'utf-8' }))
+
+            /////////////
+
+
+            /////////////
+            await processAssetExec(importedObj, true, currentKey)
+        }
+        else if (importedObj["format"] == "asset") {
+            //console.log("here")
+            await processAssetExec(importedObj, skip, currentKey)
+        }
+        else if (importedObj["format"] != "asset") {
+            throw error
+        }
+        //console.log(executionFileText)
+        //console.log("----------------------------------")
+    }
+    else {
+        // print other commands
+        executionFileText += "\n" + command["command"] + "."
+    }
+
+    //executionFile["text"] = executionFileText
+
+    //console.log(executionFile)
+
+}
+
+let processProofCommand = async (command, skip) => {
+    // print if !skip  
+    //let executionFileText = executionFile["text"]
+    //console.log(executionFileText)
+    //console.log("---------------------------------------------------")
+    if (!skip) {
+        executionFileText += command["command"] + "."
+    }
+    //executionFile["text"] = executionFileText
+}
+
+let processSystemMessage = (command) => {
+    if (command["severity"] == "error") {
+        console.log("not completely valid abella script")
+        // we do not allow to execute/publish in such case for now
+        process.exit(0)
+    }
+}
+
+module.exports = { inspect_shallow, inspect_in_depth, who_to_trust, ensureFullDAG, get_execution, verifySignature, get_specification }
