@@ -22,7 +22,7 @@ program
     .description('list the configuration parameters - ex: gateway, web3.storage api token')
     .action(listconfig);
 program
-    .command('publish-signed <fileName> <directoryPath> <target>')
+    .command('publish-signed <fileName> <profileName> <directoryPath> <target>')
     .description('publish the standard format .json file generated from abella (or other) theorem files with signature by the specified profile, and you can specify <target> as either "local" or "cloud" for publishing through web3.storage service. <directoryPath> takes the path of the directory containing the file starting from the directory of execution, ex "a/b/c.')
     .action(publishCommand);
 program
