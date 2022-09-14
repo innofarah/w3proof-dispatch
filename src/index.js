@@ -27,8 +27,8 @@ program
     .description('list config params.\n')
     .action(listconfig);
 program
-    .command('publish-signed')
-    .description('publish-sign standard format sequents file.\n')
+    .command('publish')
+    .description('publish standard format sequents file as a collection of signed sequents by a profile.\n')
     .argument('<file-name>', 'name of the file without the .json extension.\n')
     .argument('<profile-name>', 'name of the profile used for signing each sequent.\n')
     .argument('<directory-path>', 'path of directory containing the file starting from directory of execution.\n')

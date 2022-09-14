@@ -22,45 +22,40 @@ let getCommand = (cid, directoryPath) => __awaiter(void 0, void 0, void 0, funct
     yield ensureFullDAG(cid);
     try {
         let mainObj = yield ipfsGetObj(cid);
-        if (mainObj != {}) {
+        if (Object.keys(mainObj).length != 0) { // test if mainObj != {}
             if (!isFormula(mainObj) && !isSequent(mainObj) && !isAssertion(mainObj) && !isSequence(mainObj))
-                throw new Error("Retrieved object has unknown/invalid format.");
+                throw new Error("ERROR: Retrieved object has unknown/invalid format.");
             let mainObjFormat = mainObj["format"];
             if (mainObjFormat == "assertion") {
                 if (verifySignature(mainObj)) {
-                    let asset = yield ipfsGetObj(mainObj["asset"]["/"]);
-                    yield processSequent(asset, result, mainObj["principal"]);
+                    let sequent = yield ipfsGetObj(mainObj["sequent"]["/"]);
+                    yield processSequent(sequent, result, mainObj["principal"]);
                 }
                 else
-                    throw new Error("Assertion not verified.");
+                    throw new Error("ERROR: Assertion not verified.");
             }
-            else if (mainObjFormat == "asset") {
-                let assetType = mainObj["assetType"];
-                switch (assetType) {
-                    case 'formula':
-                        yield processFormula(mainObj);
-                    case 'sequent':
-                        yield processSequent(mainObj, result, "");
-                    case 'sequence':
-                        yield processSequence(mainObj, result);
-                }
-            }
+            else if (mainObjFormat == "formula")
+                yield processFormula(mainObj);
+            else if (mainObjFormat == "sequent")
+                yield processSequent(mainObj, result, "");
+            else if (mainObjFormat == "sequence")
+                yield processSequence(mainObj, result);
         }
         else
-            throw new Error("Retrieved object is empty.");
+            throw new Error("ERROR: Retrieved object is empty.");
         if (!fs.existsSync(directoryPath))
             fs.mkdirSync(directoryPath, { recursive: true });
         fs.writeFileSync(directoryPath + "/" + cid + ".json", JSON.stringify(result));
-        console.log("dag referred to by this cid is in the file named " + cid + ".json to be used by abella");
+        console.log("Input to Prover Constructed: DAG referred to by this cid is in the file named " + cid + ".json");
     }
     catch (err) {
         console.log(err);
     }
 });
 let processFormula = (obj) => __awaiter(void 0, void 0, void 0, function* () {
-    console.log("the given cid refers to the formula object:");
+    console.log("The given cid refers to the formula object:");
     console.log(obj);
-    console.log("This format is NOT allowed/expected to be imported.");
+    console.log("This format is NOT allowed/expected to be imported -> NO FILE IS CONSTRUCTED");
 });
 let processSequent = (obj, result, signer) => __awaiter(void 0, void 0, void 0, function* () {
     let lemmas = obj["lemmas"];
@@ -72,14 +67,14 @@ let processSequent = (obj, result, signer) => __awaiter(void 0, void 0, void 0, 
         // if same cidformula => entry = outputObj[theoremName]
         entry = result[theoremName];
         if (entry["cidFormula"] != obj["conclusion"]["/"]) {
-            console.error("Different formula using same name --> not allowed");
+            console.error("ERROR: Different formula using same name --> not allowed");
             process.exit(0);
         }
     }
     else {
         entry["cidFormula"] = obj["conclusion"]["/"];
         entry["formula"] = conclusion["formula"];
-        entry["sigmaFormula"] = conclusion["sigma"];
+        entry["SigmaFormula"] = conclusion["Sigma"];
         entry["sequents"] = [];
     }
     let sequent = {};
@@ -99,17 +94,20 @@ let processSequent = (obj, result, signer) => __awaiter(void 0, void 0, void 0, 
     }
     entry["sequents"].push(sequent);
     result[theoremName] = entry;
-    //console.log(outputObj)
-    //console.log("sequents")
-    //console.log(outputObj[theoremName]["sequents"])
 });
 let processSequence = (obj, result) => __awaiter(void 0, void 0, void 0, function* () {
     let sequentsLinks = obj["sequents"]; // sequents or assertions
     for (let link of sequentsLinks) {
         let entry = yield ipfsGetObj(link["/"]);
         if (isAssertion(entry)) {
-            let asset = yield ipfsGetObj(entry["asset"]["/"]);
-            yield processSequent(asset, result, entry["principal"]);
+            if (verifySignature(entry)) {
+                let sequent = yield ipfsGetObj(entry["sequent"]["/"]);
+                yield processSequent(sequent, result, entry["principal"]);
+            }
+            else {
+                console.log("ERROR: Assertion not verified");
+                process.exit(1);
+            }
         }
         else if (isSequent(entry)) {
             yield processSequent(entry, result, "");
@@ -121,7 +119,7 @@ let unfoldLemmas = (lemmas) => __awaiter(void 0, void 0, void 0, function* () {
     let lemmaFormulaObjects = [];
     for (let lemma of lemmas) {
         let formulaObject = yield ipfsGetObj(lemma["/"]);
-        lemmaFormulaObjects.push({ "name": formulaObject["name"], "formula": formulaObject["formula"], "sigma": formulaObject["sigma"] });
+        lemmaFormulaObjects.push({ "name": formulaObject["name"], "cidFormula": lemma["/"], "formula": formulaObject["formula"], "SigmaFormula": formulaObject["Sigma"] });
     }
     return lemmaFormulaObjects;
 });
@@ -134,7 +132,7 @@ let ipfsGetObj = (cid) => __awaiter(void 0, void 0, void 0, function* () {
         return obj;
     }
     catch (error) {
-        console.error("getting object from ipfs failed");
+        console.error("ERROR: getting object from ipfs failed");
         return {};
     }
 });
@@ -156,7 +154,7 @@ let ensureFullDAG = (cid) => __awaiter(void 0, void 0, void 0, function* () {
         if (config["my-gateway"])
             gateway = config["my-gateway"];
         else {
-            console.log("gateway should be specified as trying to retreive data through it .. ");
+            console.log("ERROR: gateway should be specified as trying to retreive data through it .. ");
             process.exit(1);
         }
         let url = gateway + "/api/v0/dag/export?arg=" + cid;
@@ -183,25 +181,25 @@ let ensureFullDAG = (cid) => __awaiter(void 0, void 0, void 0, function* () {
 });
 let isAssertion = (obj) => {
     if (Object.keys(obj).length == 4 && "format" in obj && obj["format"] == "assertion") {
-        return ("principal" in obj && "asset" in obj && "signature" in obj);
+        return ("principal" in obj && "sequent" in obj && "signature" in obj);
     }
     return false;
 };
 let isSequent = (obj) => {
-    if (Object.keys(obj).length == 4 && "format" in obj && obj["format"] == "asset") {
-        return ("assetType" in obj && obj["assetType"] == "sequent" && "lemmas" in obj && "conclusion" in obj);
+    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "sequent") {
+        return ("lemmas" in obj && "conclusion" in obj);
     }
     return false;
 };
 let isSequence = (obj) => {
-    if (Object.keys(obj).length == 4 && "format" in obj && obj["format"] == "asset") {
-        return ("assetType" in obj && obj["assetType"] == "sequence" && "name" in obj && "sequents" in obj);
+    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "sequence") {
+        return ("name" in obj && "sequents" in obj);
     }
     return false;
 };
 let isFormula = (obj) => {
-    if (Object.keys(obj).length == 5 && "format" in obj && obj["format"] == "asset") {
-        return ("assetType" in obj && obj["assetType"] == "formula" && "name" in obj && "formula" in obj && "sigma" in obj);
+    if (Object.keys(obj).length == 4 && "format" in obj && obj["format"] == "formula") {
+        return ("name" in obj && "formula" in obj && "Sigma" in obj);
     }
     return false;
 };
@@ -209,7 +207,7 @@ let verifySignature = (assertion) => {
     let signature = assertion["signature"];
     let claimedPublicKey = assertion["principal"];
     // the data to verify : here it's the asset's cid in the object
-    let dataToVerify = assertion["asset"]["/"];
+    let dataToVerify = assertion["sequent"]["/"];
     const verify = crypto.createVerify('SHA256');
     verify.write(dataToVerify);
     verify.end();

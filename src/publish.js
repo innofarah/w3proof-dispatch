@@ -23,10 +23,10 @@ let publishCommand = (filename, profileName, directoryPath, storage) => __awaite
         let theorems = JSON.parse(fs.readFileSync(directoryPath + "/" + filename + ".json"));
         // publish all formula objects first (to have all the cids ready before publishing a sequent in case a formula is listed as lemma)
         for (let conclusionName of Object.keys(theorems)) {
-            yield publishFormula(conclusionName, theorems[conclusionName]["conclusion"], theorems[conclusionName]["sigma"]);
+            yield publishFormula(conclusionName, theorems[conclusionName]["conclusion"], theorems[conclusionName]["Sigma"]);
         }
         for (let conclusionName of Object.keys(theorems)) {
-            let sequentsLemmas = theorems[conclusionName]["sequentsLemmas"];
+            let sequentsLemmas = theorems[conclusionName]["lemmas"];
             for (let sequentLemmas of sequentsLemmas) {
                 yield publishSequent(conclusionName, sequentLemmas);
             }
@@ -35,7 +35,7 @@ let publishCommand = (filename, profileName, directoryPath, storage) => __awaite
             yield publishAssertion(sequentCid, profileName);
         }
         let sequenceCid = yield publishSequence(filename, publishedAssertions); //for now publish sequence as composed of assertions signed by the same profile
-        console.log("The root cid of the published sequence of assertions by profile: " + profileName + " is " + sequenceCid);
+        console.log("Input from Prover Published: The root cid of the published sequence of assertions by profile: " + profileName + " is " + sequenceCid);
         // if cloud (global), publish the final sequence cid (dag) through the web3.storage api
         if (storage == "cloud") {
             publishDagToCloud(sequenceCid);
@@ -47,11 +47,10 @@ let publishCommand = (filename, profileName, directoryPath, storage) => __awaite
 });
 let publishFormula = (formulaName, formula, sigma) => __awaiter(void 0, void 0, void 0, function* () {
     let th = {
-        "format": "asset",
-        "assetType": "formula",
+        "format": "formula",
         "name": formulaName,
         "formula": formula,
-        "sigma": sigma
+        "Sigma": sigma
     };
     let cid = yield ipfsAddObj(th);
     publishedFormulas[formulaName] = cid;
@@ -72,8 +71,7 @@ let publishSequent = (conclusionName, lemmas) => __awaiter(void 0, void 0, void 
         }
     }
     let seq = {
-        "format": "asset",
-        "assetType": "sequent",
+        "format": "sequent",
         "lemmas": lemmasIpfs,
         "conclusion": { "/": publishedFormulas[conclusionName] }
     };
@@ -92,14 +90,14 @@ let publishAssertion = (sequentCid, profileName) => __awaiter(void 0, void 0, vo
             let assertion = {
                 "format": "assertion",
                 "principal": profile["public-key"],
-                "asset": { "/": sequentCid },
+                "sequent": { "/": sequentCid },
                 "signature": signature
             };
             let assertionCid = yield ipfsAddObj(assertion);
             publishedAssertions.push(assertionCid);
         }
         else
-            throw new Error("given profile name does not exist");
+            throw new Error("ERROR: given profile name does not exist");
     }
     catch (error) {
         console.error(error);
@@ -112,12 +110,10 @@ let publishSequence = (sequenceName, sequentsCids) => __awaiter(void 0, void 0, 
         sequentsLinks.push({ "/": cid });
     }
     let sequence = {
-        "format": "asset",
-        "assetType": "sequence",
+        "format": "sequence",
         "name": sequenceName,
         "sequents": sequentsLinks
     };
-    console.log(sequence);
     let sequenceCid = yield ipfsAddObj(sequence);
     return sequenceCid;
 });
@@ -130,7 +126,7 @@ let ipfsAddObj = (obj) => __awaiter(void 0, void 0, void 0, function* () {
         return output.substring(0, output.length - 1);
     }
     catch (error) {
-        console.error("adding object to ipfs failed");
+        console.error("ERROR: adding object to ipfs failed");
         return "";
     }
 });
@@ -144,7 +140,7 @@ let publishDagToCloud = (cid) => __awaiter(void 0, void 0, void 0, function* () 
             web3Client = new Web3Storage({ token: web3Token });
         }
         else {
-            throw new Error("setting a web3.storage token is required as the chosen mode for publishing is 'cloud' and not 'local'.");
+            throw new Error("ERROR: setting a web3.storage token is required as the chosen mode for publishing is 'cloud' and not 'local'.");
         }
         let cmd = "ipfs dag export " + cid + " > tmpcar.car";
         execSync(cmd, { encoding: 'utf-8' });

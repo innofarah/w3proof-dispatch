@@ -49,8 +49,6 @@ let keygen = (profileName) => {
             format: 'pem'
         }
     });
-    //console.log("private key : " + privateKey)
-    //console.log("public key : " + publicKey)
     // create a profile and add it to the profiles file
     let fingerPrint = crypt.createHash('sha256').update(publicKey).digest('hex');
     let profiles = JSON.parse(fs.readFileSync(profilespath));
