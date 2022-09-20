@@ -89,7 +89,7 @@ let publishAssertion = (sequentCid, profileName) => __awaiter(void 0, void 0, vo
             const signature = sign.sign(profile["private-key"], 'hex');
             let assertion = {
                 "format": "assertion",
-                "principal": profile["public-key"],
+                "agent": profile["public-key"],
                 "sequent": { "/": sequentCid },
                 "signature": signature
             };
