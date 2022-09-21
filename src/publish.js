@@ -155,6 +155,7 @@ let publishDagToCloud = (cid) => __awaiter(void 0, void 0, void 0, function* () 
         const reader = yield CarReader.fromIterable(inStream);
         const cid1 = yield web3Client.putCar(reader);
         console.log("DAG successfully published to web3.storage!");
+        console.log("root cid: " + cid);
         fs.unlink('tmpcar.car', (err) => {
             if (err)
                 throw err;
