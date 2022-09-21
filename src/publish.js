@@ -48,12 +48,17 @@ let publishCommand = (filename, profileName, directoryPath, storage) => __awaite
 let publishFormula = (formulaName, formula, sigma) => __awaiter(void 0, void 0, void 0, function* () {
     let th = {
         "format": "formula",
-        "name": formulaName,
         "formula": formula,
         "Sigma": sigma
     };
     let cid = yield ipfsAddObj(th);
-    publishedFormulas[formulaName] = cid;
+    let thNamed = {
+        "format": "named-formula",
+        "name": formulaName,
+        "formula": { "/": cid }
+    };
+    let cidNamed = yield ipfsAddObj(thNamed);
+    publishedFormulas[formulaName] = cidNamed;
 });
 let publishSequent = (conclusionName, lemmas) => __awaiter(void 0, void 0, void 0, function* () {
     let lemmasIpfs = [];
