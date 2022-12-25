@@ -21,7 +21,7 @@ let setup = () => {
         fs.writeFileSync(profilespath, JSON.stringify({}));
     }
 };
-let keygen = (profileName) => {
+let keygen = (profileName, target) => {
     /* const {
         publicKey,
         privateKey
@@ -54,6 +54,7 @@ let keygen = (profileName) => {
     let profiles = JSON.parse(fs.readFileSync(profilespath));
     let newProfile = {
         "name": profileName,
+        "target": target,
         "public-key": publicKey,
         "private-key": privateKey,
         "fingerprint": fingerPrint

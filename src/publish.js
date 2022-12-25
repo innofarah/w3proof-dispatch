@@ -18,52 +18,123 @@ const { configpath, profilespath } = initialVals;
 let publishedFormulas = {};
 let publishedSequents = [];
 let publishedAssertions = [];
-let publishCommand = (filename, profileName, directoryPath, storage) => __awaiter(void 0, void 0, void 0, function* () {
+let publishedDeclarations = {};
+let publishCommand = (inputPath) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        let theorems = JSON.parse(fs.readFileSync(directoryPath + "/" + filename + ".json"));
-        // publish all formula objects first (to have all the cids ready before publishing a sequent in case a formula is listed as lemma)
-        for (let conclusionName of Object.keys(theorems)) {
-            yield publishFormula(conclusionName, theorems[conclusionName]["conclusion"], theorems[conclusionName]["Sigma"]);
+        let input = JSON.parse(fs.readFileSync(inputPath)); // json file expected
+        // publish declarations first (because they need to be linked in formulas)
+        // consider an entry in "declarations" (like "fib": ..) in the input file to have two possible values: either [string] or ["ipld:ciddeclarationobjcet"]
+        // publish according to "format" in the given input file, first we consider the "sequence" format (where all is of one language)
+        // considering the "format" attribute to be fixed (exists all the time) for all the possible input-formats (considering that input-formats might differ according to format of published objects)
+        let format = input["format"];
+        if (format == "sequence") {
+            publishSequenceCommand(input);
         }
-        for (let conclusionName of Object.keys(theorems)) {
-            let sequentsLemmas = theorems[conclusionName]["lemmas"];
-            for (let sequentLemmas of sequentsLemmas) {
-                yield publishSequent(conclusionName, sequentLemmas);
-            }
-        }
-        for (let sequentCid of publishedSequents) {
-            yield publishAssertion(sequentCid, profileName);
-        }
-        let sequenceCid = yield publishSequence(filename, publishedAssertions); //for now publish sequence as composed of assertions signed by the same profile
-        console.log("Input from Prover Published: The root cid of the published sequence of assertions by profile: " + profileName + " is " + sequenceCid);
-        // if cloud (global), publish the final sequence cid (dag) through the web3.storage api
-        if (storage == "cloud") {
-            publishDagToCloud(sequenceCid);
+        else {
+            console.error(new Error("unknown input format"));
         }
     }
     catch (error) {
         console.error(error);
     }
 });
-let publishFormula = (formulaName, formula, sigma) => __awaiter(void 0, void 0, void 0, function* () {
-    let th = {
+let publishSequenceCommand = (input) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        let givenSequenceName = input["input-for"];
+        let language = input["language"];
+        let profile = input["profile"];
+        let sequents = input["sequents"];
+        let namedFormulas = input["named-formulas"];
+        let declarations = input["declarations"];
+        // publishing declarations -> then named-formulas -> then sequents -> then assertions -> then sequence
+        for (let decName of Object.keys(declarations)) {
+            yield publishDeclarations(language, decName, declarations[decName]["content"]);
+        }
+        for (let name of Object.keys(namedFormulas)) {
+            yield publishFormula(language, name, namedFormulas[name]["content"], namedFormulas[name]["declarations"]);
+        }
+        /*for (let conclusionName of Object.keys(sequents)) {
+            await publishFormula(language, conclusionName, sequents[conclusionName]["conclusion"], sequents[conclusionName]["declarations"])
+        }*/
+        for (let sequent of sequents) {
+            yield publishSequent(sequent);
+        }
+        /*for (let conclusionName of Object.keys(sequents)) {
+
+            let sequentsLemmas: [[string]] = sequents[conclusionName]["lemmas"]
+            for (let sequentLemmas of sequentsLemmas) {
+                await publishSequent(conclusionName, sequentLemmas)
+            }
+        }*/
+        for (let sequentCid of publishedSequents) {
+            yield publishAssertion(sequentCid, profile);
+        }
+        let sequenceCid = yield publishSequence(givenSequenceName, publishedAssertions, language); //for now publish sequence as composed of assertions signed by the same profile
+        console.log("Input from Prover Published: The root cid of the published sequence of assertions by profile: " + profile + " is " + sequenceCid);
+        // if cloud (global), publish the final sequence cid (dag) through the web3.storage api
+        // should find first what is the "target" in the profile stored information (locally in the user's .config/.../profiles.json)
+        try {
+            let target = JSON.parse(fs.readFileSync(profilespath))[profile]["target"];
+            if (target == "cloud") {
+                publishDagToCloud(sequenceCid);
+            }
+        }
+        catch (error) {
+            console.error(error);
+        }
+    }
+    catch (error) {
+        console.error(error);
+    }
+});
+let publishDeclarations = (language, name, declarations) => __awaiter(void 0, void 0, void 0, function* () {
+    // consider an entry in "declarations" (like "fib": ..) in the input file to have two possible values: either [string] or "ipld:ciddeclarationobjcet"
+    // use ipfsAddFile to add what's in content (if [string]), 
+    // use ipfsAddObj to add the declarations end object
+    if (typeof declarations == "string") {
+        if (declarations.startsWith("ipld:")) {
+            let cidObj = declarations.split(":")[1];
+            publishedDeclarations[name] = cidObj;
+        }
+        else { // error (wrong format unexpected)
+        }
+    }
+    else if (declarations.length > 0 && typeof declarations[0] == "string") { // if type is [string] (fix this, now for testing)
+        let cidContent = yield ipfsAddObj(declarations);
+        let declarationsObj = {
+            "format": "declarations",
+            "language": language,
+            "content": { "/": cidContent }
+        };
+        let cidObj = yield ipfsAddObj(declarationsObj);
+        publishedDeclarations[name] = cidObj;
+    }
+    else { // error unexpected format
+    }
+});
+let publishFormula = (language, formulaName, formula, declarations) => __awaiter(void 0, void 0, void 0, function* () {
+    let cidFormula = yield ipfsAddObj(formula);
+    let formulaObj = {
         "format": "formula",
-        "formula": formula,
-        "Sigma": sigma
+        "language": language,
+        "content": { "/": cidFormula },
+        "declarations": { "/": publishedDeclarations[declarations] }
     };
-    let cid = yield ipfsAddObj(th);
-    let thNamed = {
+    let cid = yield ipfsAddObj(formulaObj);
+    let formulaNamed = {
         "format": "named-formula",
         "name": formulaName,
         "formula": { "/": cid }
     };
-    let cidNamed = yield ipfsAddObj(thNamed);
+    let cidNamed = yield ipfsAddObj(formulaNamed);
     publishedFormulas[formulaName] = cidNamed;
 });
-let publishSequent = (conclusionName, lemmas) => __awaiter(void 0, void 0, void 0, function* () {
+let publishSequent = (sequent) => __awaiter(void 0, void 0, void 0, function* () {
+    let conclusion = sequent["conclusion"];
+    let lemmas = sequent["lemmas"];
     let lemmasIpfs = [];
     for (let lemma of lemmas) {
-        if (lemma.startsWith("ipfs:")) {
+        if (lemma.startsWith("ipld:")) {
             // assuming the cids in "lemmas" should refer to a "formula" object
             //(if we remove the .thc generation and replace it with generation of the output format.json file produced by w3proof-dispatch get)
             let cidFormula = lemma.split(":")[1];
@@ -78,7 +149,7 @@ let publishSequent = (conclusionName, lemmas) => __awaiter(void 0, void 0, void 
     let seq = {
         "format": "sequent",
         "lemmas": lemmasIpfs,
-        "conclusion": { "/": publishedFormulas[conclusionName] }
+        "conclusion": { "/": publishedFormulas[conclusion] }
     };
     let cid = yield ipfsAddObj(seq);
     publishedSequents.push(cid);
@@ -109,15 +180,16 @@ let publishAssertion = (sequentCid, profileName) => __awaiter(void 0, void 0, vo
         process.exit(0);
     }
 });
-let publishSequence = (sequenceName, sequentsCids) => __awaiter(void 0, void 0, void 0, function* () {
-    let sequentsLinks = [];
-    for (let cid of sequentsCids) {
-        sequentsLinks.push({ "/": cid });
+let publishSequence = (sequenceName, assertionsCids, language) => __awaiter(void 0, void 0, void 0, function* () {
+    let assertionsLinks = [];
+    for (let cid of assertionsCids) {
+        assertionsLinks.push({ "/": cid });
     }
     let sequence = {
         "format": "sequence",
+        "language": language,
         "name": sequenceName,
-        "sequents": sequentsLinks
+        "assertions": assertionsLinks
     };
     let sequenceCid = yield ipfsAddObj(sequence);
     return sequenceCid;
@@ -135,6 +207,21 @@ let ipfsAddObj = (obj) => __awaiter(void 0, void 0, void 0, function* () {
         return "";
     }
 });
+// subject to change, check if adding as file is the correct (and better) thing to do for declarations content and formula string
+/*let ipfsAddFile = async (data: string) => {
+    try {
+        fs.writeFileSync("tmpFile.txt", data)
+        let addcmd = "ipfs add tmpFile.txt --cid-version 1 --pin"
+        let output = execSync(addcmd, { encoding: 'utf-8' })
+
+        fs.unlinkSync('tmpFile.txt')
+        //return output.substring(0, output.length - 1)
+        return output.split(" ")[1] // not really best way to do it (must us nodjs ipfs api not cmd)
+    } catch (error) {
+        console.error("ERROR: adding object to ipfs failed");
+        return ""
+    }
+}*/
 let publishDagToCloud = (cid) => __awaiter(void 0, void 0, void 0, function* () {
     let web3Token, web3Client;
     try {
