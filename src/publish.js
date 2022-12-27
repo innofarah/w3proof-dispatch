@@ -53,23 +53,13 @@ let publishSequenceCommand = (input) => __awaiter(void 0, void 0, void 0, functi
         for (let name of Object.keys(namedFormulas)) {
             yield publishFormula(language, name, namedFormulas[name]["content"], namedFormulas[name]["declarations"]);
         }
-        /*for (let conclusionName of Object.keys(sequents)) {
-            await publishFormula(language, conclusionName, sequents[conclusionName]["conclusion"], sequents[conclusionName]["declarations"])
-        }*/
         for (let sequent of sequents) {
             yield publishSequent(sequent);
         }
-        /*for (let conclusionName of Object.keys(sequents)) {
-
-            let sequentsLemmas: [[string]] = sequents[conclusionName]["lemmas"]
-            for (let sequentLemmas of sequentsLemmas) {
-                await publishSequent(conclusionName, sequentLemmas)
-            }
-        }*/
         for (let sequentCid of publishedSequents) {
             yield publishAssertion(sequentCid, profile);
         }
-        let sequenceCid = yield publishSequence(givenSequenceName, publishedAssertions, language); //for now publish sequence as composed of assertions signed by the same profile
+        let sequenceCid = yield publishSequence(givenSequenceName, publishedAssertions); //for now publish sequence as composed of assertions signed by the same profile
         console.log("Input from Prover Published: The root cid of the published sequence of assertions by profile: " + profile + " is " + sequenceCid);
         // if cloud (global), publish the final sequence cid (dag) through the web3.storage api
         // should find first what is the "target" in the profile stored information (locally in the user's .config/.../profiles.json)
@@ -180,14 +170,13 @@ let publishAssertion = (sequentCid, profileName) => __awaiter(void 0, void 0, vo
         process.exit(0);
     }
 });
-let publishSequence = (sequenceName, assertionsCids, language) => __awaiter(void 0, void 0, void 0, function* () {
+let publishSequence = (sequenceName, assertionsCids) => __awaiter(void 0, void 0, void 0, function* () {
     let assertionsLinks = [];
     for (let cid of assertionsCids) {
         assertionsLinks.push({ "/": cid });
     }
     let sequence = {
         "format": "sequence",
-        "language": language,
         "name": sequenceName,
         "assertions": assertionsLinks
     };

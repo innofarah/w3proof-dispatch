@@ -181,7 +181,6 @@ let getAssertion = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, fu
 let getSequence = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
     result["output-for"] = cidObj;
     result["format"] = "sequence";
-    result["language"] = obj["language"];
     result["name"] = obj["name"];
     result["assertions"] = [];
     result["named-formulas"] = {};
