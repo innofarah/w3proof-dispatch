@@ -9,17 +9,10 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 const fs = require('fs');
-const { execSync } = require('child_process');
-const crypto = require('crypto');
-const util = require('util');
-const stream = require('stream');
-const fetch = require('node-fetch').default;
-const initialVals = require("./initial-vals");
-const verification = require("./verifications");
-const { configpath, profilespath, keystorepath } = initialVals;
-const { isDeclarations, isFormula, isNamedFormula, isSequent, isAssertion, isSequence, verifySignature } = verification;
+const utilities = require("./utilities");
+const { isDeclaration, isFormula, isNamedFormula, isSequent, isAssertion, isSequence, verifySignature, fingerPrint, ipfsGetObj, ensureFullDAG } = utilities;
 // we need a general get <cid> command that works according to "format":
-// declarations ->
+// declaration ->
 // formula ->
 // named-formula ->
 // sequent ->
@@ -41,12 +34,12 @@ let getCommand = (cid, directoryPath) => __awaiter(void 0, void 0, void 0, funct
     try {
         let mainObj = yield ipfsGetObj(cid);
         if (Object.keys(mainObj).length != 0) { // test if mainObj != {}
-            if (!isDeclarations(mainObj) && !isFormula(mainObj) && !isNamedFormula(mainObj) && !isSequent(mainObj) && !isAssertion(mainObj) && !isSequence(mainObj))
+            if (!isDeclaration(mainObj) && !isFormula(mainObj) && !isNamedFormula(mainObj) && !isSequent(mainObj) && !isAssertion(mainObj) && !isSequence(mainObj))
                 throw new Error("ERROR: Retrieved object has unknown/invalid format.");
             let mainObjFormat = mainObj["format"];
             // for now we will implement only "sequence" get
-            if (mainObjFormat == "declarations") {
-                yield getDeclarations(cid, mainObj, result);
+            if (mainObjFormat == "declaration") {
+                yield getDeclaration(cid, mainObj, result);
             }
             else if (mainObjFormat == "named-formula") {
                 yield getNamedFormula(cid, mainObj, result);
@@ -85,20 +78,20 @@ let processFormula = (cid, result, named) => __awaiter(void 0, void 0, void 0, f
     }
     output["language"] = mainObj["language"];
     output["content"] = yield ipfsGetObj(mainObj["content"]["/"]);
-    output["declarations"] = mainObj["declarations"]["/"];
-    let cidDeclarations = mainObj["declarations"]["/"];
-    if (!result["declarations"][cidDeclarations]) {
-        result["declarations"][cidDeclarations] = yield processDeclarations(cidDeclarations, result);
+    output["declaration"] = mainObj["declaration"]["/"];
+    let cidDeclaration = mainObj["declaration"]["/"];
+    if (!result["declarations"][cidDeclaration]) {
+        result["declarations"][cidDeclaration] = yield processDeclaration(cidDeclaration, result);
     }
     return output;
 });
-let processDeclarations = (cid, result) => __awaiter(void 0, void 0, void 0, function* () {
-    let declarationsObj = yield ipfsGetObj(cid);
-    let declarationsOutput = {};
-    declarationsOutput["language"] = declarationsObj["language"];
-    let content = yield ipfsGetObj(declarationsObj["content"]["/"]);
-    declarationsOutput["content"] = content;
-    return declarationsOutput;
+let processDeclaration = (cid, result) => __awaiter(void 0, void 0, void 0, function* () {
+    let declarationObj = yield ipfsGetObj(cid);
+    let declarationOutput = {};
+    declarationOutput["language"] = declarationObj["language"];
+    let content = yield ipfsGetObj(declarationObj["content"]["/"]);
+    declarationOutput["content"] = content;
+    return declarationOutput;
 });
 let processAssertion = (assertion, result) => __awaiter(void 0, void 0, void 0, function* () {
     let sequent = yield ipfsGetObj(assertion["sequent"]["/"]);
@@ -129,11 +122,12 @@ let processSequent = (cid, result) => __awaiter(void 0, void 0, void 0, function
     }
     return sequentOutput;
 });
-let getDeclarations = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
+let getDeclaration = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
     result["output-for"] = cidObj;
-    result["format"] = "declarations";
-    let declarationsOutput = yield processDeclarations(cidObj, result);
-    result["declaration"] = declarationsOutput;
+    result["format"] = "declaration";
+    result["declarations"] = {};
+    let declarationOutput = yield processDeclaration(cidObj, result);
+    result["declarations"][cidObj] = declarationOutput;
 });
 let getFormula = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
     result["output-for"] = cidObj;
@@ -194,79 +188,6 @@ let getSequence = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, fun
         }
         else {
             console.log("ERROR: Assertion not verified");
-            process.exit(1);
-        }
-    }
-});
-let fingerPrint = (agent) => {
-    let keystore = JSON.parse(fs.readFileSync(keystorepath));
-    let fingerPrint;
-    if (keystore[agent]) {
-        fingerPrint = keystore[agent];
-    }
-    else {
-        fingerPrint = crypto.createHash('sha256').update(agent).digest('hex');
-        keystore[agent] = fingerPrint;
-        fs.writeFileSync(keystorepath, JSON.stringify(keystore));
-    }
-    return fingerPrint;
-};
-// --------------------------
-// for retrieval from ipfs
-// --------------------------
-let ipfsGetObj = (cid) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        let cmd = "ipfs dag get " + cid + " > " + cid + ".json";
-        execSync(cmd, { encoding: 'utf-8' });
-        let obj = JSON.parse(fs.readFileSync(cid + ".json"));
-        fs.unlinkSync(cid + ".json");
-        return obj;
-    }
-    catch (error) {
-        console.error("ERROR: getting object from ipfs failed");
-        return {};
-    }
-});
-let ensureFullDAG = (cid) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        //test if it exists locally / or tries to retrieve the missing links in case the ipfs daemon is activated
-        let cmd = "ipfs dag export -p " + cid + " > tmpp.car";
-        // for now : causes a problem if we use an address with slashes "/" since ipfs export doesn't support it currently
-        console.log("ipfs daemon working on retrieving DAG .. Please be patient ..");
-        execSync(cmd, { encoding: 'utf-8' }); // this fails if there are missing links from the local ipfs repo / or unsuccessful to retrieve in case the ipfs daemon is activated
-        fs.unlink('tmpp.car', (err) => {
-            if (err)
-                throw err;
-        });
-    }
-    catch (err) {
-        console.log("There are missing links that were not found in the local ipfs cache OR the ipfs daemon (if activated) has not been able to find them, trying to retrieve them from the specified gateway ..");
-        let config = JSON.parse(fs.readFileSync(configpath));
-        let gateway;
-        if (config["my-gateway"])
-            gateway = config["my-gateway"];
-        else {
-            console.log("ERROR: gateway should be specified as trying to retreive data through it .. ");
-            process.exit(1);
-        }
-        let url = gateway + "/api/v0/dag/export?arg=" + cid;
-        //let result = await axios.get(url)
-        // problem here: we need to return the result as a stream to properly create the .car file from it -> axios not sufficient
-        try {
-            const streamPipeline = util.promisify(stream.pipeline);
-            const response = yield fetch(url);
-            if (!response.ok)
-                throw new Error(`unexpected response ${response.statusText}`);
-            yield streamPipeline(response.body, fs.createWriteStream('tmpp.car'));
-            //fs.writeFileSync("tmpp.car", response.body)
-            execSync("ipfs dag import tmpp.car", { encoding: 'utf-8' });
-            fs.unlink('tmpp.car', (err) => {
-                if (err)
-                    throw err;
-            });
-        }
-        catch (err) {
-            console.log(err);
             process.exit(1);
         }
     }
