@@ -11,8 +11,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 const fs = require('fs');
 const utilities = require("./utilities");
 const { isSequent, isAssertion, isSequence, verifySignature, fingerPrint, inAllowList, ipfsGetObj, ensureFullDAG } = utilities;
-let resultUnits = {};
-let getResult = (cidFormula, assertionsList) => __awaiter(void 0, void 0, void 0, function* () {
+let getResult = (cidFormula, assertionsList, resultUnits, path) => __awaiter(void 0, void 0, void 0, function* () {
     let result = [];
     // for the formula itself
     result.push({ "lemmas": [cidFormula], "agents": [] }); //
@@ -21,24 +20,34 @@ let getResult = (cidFormula, assertionsList) => __awaiter(void 0, void 0, void 0
         let desiredRecord = assertionsList[cidFormula];
         //console.log(desiredRecord)
         for (let assertion of desiredRecord) {
+            let ignoreAssertion = false;
             let lemmas = assertion["lemmas"];
             for (let lemma of lemmas) {
-                //console.log(lemma)
+                // if lemma == cidFormula ? --> ignore assertion? (not useful?--just add adds useless combinations)
+                // if (lemma == cidFormula || path.includes(lemma))
+                if (path.includes(lemma))
+                    ignoreAssertion = true;
                 // if not computed previously
-                if (!resultUnits[lemma]) {
+                if (!resultUnits[lemma] && !ignoreAssertion) {
                     if (assertionsList[lemma]) { // if lemma exists in the file, compute and save its result
-                        resultUnits[lemma] = yield getResult(lemma, assertionsList);
+                        path.push(lemma);
+                        resultUnits[lemma] = yield getResult(lemma, assertionsList, resultUnits, path);
+                        path.pop();
                     }
                 }
             }
             // after computing (if not previously done) the resultUnit for each lemma
-            let combinations = yield getAllCombinationsFrom(assertion);
-            for (let combination of combinations) {
-                // maybe here it's best for now to remove repetitions
-                // in "lemmas" and "agents"
-                result.push({ "lemmas": [...new Set(combination["lemmas"])],
-                    "agents": [...new Set(combination["agents"])] });
-                //result.push(combination)
+            if (!ignoreAssertion) {
+                let combinations = yield getAllCombinationsFrom(assertion, resultUnits);
+                for (let combination of combinations) {
+                    // maybe here it's best for now to remove repetitions
+                    // in "lemmas" and "agents"
+                    result.push({
+                        "lemmas": [...new Set(combination["lemmas"])],
+                        "agents": [...new Set(combination["agents"])]
+                    });
+                    //result.push(combination)
+                }
             }
         }
     }
@@ -46,7 +55,7 @@ let getResult = (cidFormula, assertionsList) => __awaiter(void 0, void 0, void 0
     return [...new Set(result)];
 });
 // A, B, C |- N,  |- N,  A |- N
-let getAllCombinationsFrom = (assertion) => __awaiter(void 0, void 0, void 0, function* () {
+let getAllCombinationsFrom = (assertion, resultUnits) => __awaiter(void 0, void 0, void 0, function* () {
     // combination of 
     let combinations = []; // combination of form {"lemmas": [], "agents": []}
     let lemmas = assertion["lemmas"];
@@ -117,8 +126,9 @@ let getCartesian = (fst, snd) => __awaiter(void 0, void 0, void 0, function* () 
 // expected filepath: of file assertion-list-for-lookup.json; this is considered to produced from assertioncidlist (do later)
 // assuming that the assertions existing in this file have their signatures verified previously.
 let lookup = (cidFormula, filepath) => __awaiter(void 0, void 0, void 0, function* () {
+    let resultUnits = {};
     let assertionsListJSON = JSON.parse(fs.readFileSync(filepath));
-    let result = yield getResult(cidFormula, assertionsListJSON);
+    let result = yield getResult(cidFormula, assertionsListJSON, resultUnits, [cidFormula]);
     //return result
     console.log(result);
 });
