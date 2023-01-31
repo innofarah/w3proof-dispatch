@@ -9,37 +9,53 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 const fs = require('fs');
-const { execSync } = require('child_process');
-const crypto = require('crypto');
-const util = require('util');
-const stream = require('stream');
-const fetch = require('node-fetch').default;
-const initialVals = require("./initial-vals");
-const { configpath, profilespath, keystorepath } = initialVals;
-// cid refers to: formula, sequent, assertion, or sequence
+const utilities = require("./utilities");
+const { isDeclaration, isFormula, isNamedFormula, isSequent, isAssertion, isSequence, verifySignature, fingerPrint, ipfsGetObj, ensureFullDAG } = utilities;
+// we need a general get <cid> command that works according to "format":
+// declaration ->
+// formula ->
+// named-formula ->
+// sequent ->
+// assertion ->
+// sequence -> similar to the way we has a standard format for "sequence" at publish, there will be a similar one at get
+// etc...  
+// dispatch will produce an output for all these object types, and a consumer (prover for ex) would decide what format it reads and how it should read it.
+//let getCommand = async (cid: string, filepath) => {
 let getCommand = (cid, directoryPath) => __awaiter(void 0, void 0, void 0, function* () {
+    /*let outputPath
+    if (Object.values(filepath).length != 0) {
+        outputPath =  Object.values(filepath)
+    }
+    else { // if no filepath argument(option) is given
+        outputPath = cid + ".json" // the default value for the output file path
+    }*/
     let result = {};
     yield ensureFullDAG(cid);
     try {
         let mainObj = yield ipfsGetObj(cid);
         if (Object.keys(mainObj).length != 0) { // test if mainObj != {}
-            if (!isFormula(mainObj) && !isNamedFormula(mainObj) && !isSequent(mainObj) && !isAssertion(mainObj) && !isSequence(mainObj))
+            if (!isDeclaration(mainObj) && !isFormula(mainObj) && !isNamedFormula(mainObj) && !isSequent(mainObj) && !isAssertion(mainObj) && !isSequence(mainObj))
                 throw new Error("ERROR: Retrieved object has unknown/invalid format.");
             let mainObjFormat = mainObj["format"];
-            if (mainObjFormat == "assertion") {
-                if (verifySignature(mainObj)) {
-                    let sequent = yield ipfsGetObj(mainObj["sequent"]["/"]);
-                    yield processSequent(sequent, result, mainObj["agent"]);
-                }
-                else
-                    throw new Error("ERROR: Assertion not verified.");
+            // for now we will implement only "sequence" get
+            if (mainObjFormat == "declaration") {
+                yield getDeclaration(cid, mainObj, result);
             }
-            else if (mainObjFormat == "formula" || mainObjFormat == "named-formula")
-                yield processFormula(mainObj);
-            else if (mainObjFormat == "sequent")
-                yield processSequent(mainObj, result, "");
-            else if (mainObjFormat == "sequence")
-                yield processSequence(mainObj, result);
+            else if (mainObjFormat == "named-formula") {
+                yield getNamedFormula(cid, mainObj, result);
+            }
+            else if (mainObjFormat == "formula") {
+                yield getFormula(cid, mainObj, result);
+            }
+            else if (mainObjFormat == "sequent") {
+                yield getSequent(cid, mainObj, result);
+            }
+            else if (mainObjFormat == "assertion") {
+                yield getAssertion(cid, mainObj, result);
+            }
+            else if (mainObjFormat == "sequence") {
+                yield getSequence(cid, mainObj, result);
+            }
         }
         else
             throw new Error("ERROR: Retrieved object is empty.");
@@ -52,176 +68,128 @@ let getCommand = (cid, directoryPath) => __awaiter(void 0, void 0, void 0, funct
         console.log(err);
     }
 });
-let processFormula = (obj) => __awaiter(void 0, void 0, void 0, function* () {
-    console.log("The given cid refers to the formula object:");
-    console.log(obj);
-    console.log("This format is NOT allowed/expected to be imported -> NO FILE IS CONSTRUCTED");
+let processFormula = (cid, result, named) => __awaiter(void 0, void 0, void 0, function* () {
+    let mainObj = yield ipfsGetObj(cid);
+    let output = {};
+    if (named) {
+        output["name"] = mainObj["name"];
+        output["cid-formula"] = mainObj["formula"]["/"];
+        mainObj = yield ipfsGetObj(mainObj["formula"]["/"]);
+    }
+    output["language"] = mainObj["language"];
+    output["content"] = yield ipfsGetObj(mainObj["content"]["/"]);
+    output["declaration"] = mainObj["declaration"]["/"];
+    let cidDeclaration = mainObj["declaration"]["/"];
+    if (!result["declarations"][cidDeclaration]) {
+        result["declarations"][cidDeclaration] = yield processDeclaration(cidDeclaration, result);
+    }
+    return output;
 });
-let processSequent = (obj, result, signer) => __awaiter(void 0, void 0, void 0, function* () {
-    let lemmas = obj["lemmas"];
-    let namedConclusion = yield ipfsGetObj(obj["conclusion"]["/"]);
-    let entry = {};
-    let theoremName = namedConclusion["name"];
-    if (result[theoremName]) {
-        // test if different cidformula => error, exit
-        // if same cidformula => entry = outputObj[theoremName]
-        entry = result[theoremName];
-        if (entry["cidFormula"] != obj["conclusion"]["/"]) {
-            console.error("ERROR: Different formula using same name --> not allowed");
-            process.exit(0);
-        }
+let processDeclaration = (cid, result) => __awaiter(void 0, void 0, void 0, function* () {
+    let declarationObj = yield ipfsGetObj(cid);
+    let declarationOutput = {};
+    declarationOutput["language"] = declarationObj["language"];
+    let content = yield ipfsGetObj(declarationObj["content"]["/"]);
+    declarationOutput["content"] = content;
+    return declarationOutput;
+});
+let processAssertion = (assertion, result) => __awaiter(void 0, void 0, void 0, function* () {
+    let sequent = yield ipfsGetObj(assertion["sequent"]["/"]);
+    let assertionOutput = {};
+    assertionOutput["agent"] = fingerPrint(assertion["agent"]);
+    let conclusionCid = sequent["conclusion"]["/"];
+    assertionOutput["conclusion"] = conclusionCid;
+    result["named-formulas"][conclusionCid] = yield processFormula(conclusionCid, result, true);
+    assertionOutput["lemmas"] = [];
+    for (let lemmaLink of sequent["lemmas"]) {
+        let lemmaCid = lemmaLink["/"];
+        assertionOutput["lemmas"].push(lemmaCid);
+        result["named-formulas"][lemmaCid] = yield processFormula(lemmaCid, result, true);
+    }
+    return assertionOutput;
+});
+let processSequent = (cid, result) => __awaiter(void 0, void 0, void 0, function* () {
+    let sequent = yield ipfsGetObj(cid);
+    let sequentOutput = {};
+    let conclusionCid = sequent["conclusion"]["/"];
+    sequentOutput["conclusion"] = conclusionCid;
+    result["named-formulas"][conclusionCid] = yield processFormula(conclusionCid, result, true);
+    sequentOutput["lemmas"] = [];
+    for (let lemmaLink of sequent["lemmas"]) {
+        let lemmaCid = lemmaLink["/"];
+        sequentOutput["lemmas"].push(lemmaCid);
+        result["named-formulas"][lemmaCid] = yield processFormula(lemmaCid, result, true);
+    }
+    return sequentOutput;
+});
+let getDeclaration = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
+    result["output-for"] = cidObj;
+    result["format"] = "declaration";
+    result["declarations"] = {};
+    let declarationOutput = yield processDeclaration(cidObj, result);
+    result["declarations"][cidObj] = declarationOutput;
+});
+let getFormula = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
+    result["output-for"] = cidObj;
+    result["format"] = "formula";
+    result["formula"] = {};
+    result["declarations"] = {};
+    let formulaOutput = yield processFormula(cidObj, result, false);
+    result["formula"] = formulaOutput;
+});
+let getNamedFormula = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
+    result["output-for"] = cidObj;
+    result["format"] = "named-formula";
+    result["named-formula"] = {};
+    result["declarations"] = {};
+    let namedFormulaOutput = yield processFormula(cidObj, result, true);
+    result["named-formula"] = namedFormulaOutput;
+});
+let getSequent = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
+    result["output-for"] = cidObj;
+    result["format"] = "sequent";
+    result["sequent"] = {}; // notice putting "sequent" instead of "assertion" and "assertions"
+    result["named-formulas"] = {}; // same as assertion and assertions
+    result["declarations"] = {};
+    let sequentOutput = yield processSequent(cidObj, result);
+    result["sequent"] = sequentOutput;
+});
+let getAssertion = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
+    result["output-for"] = cidObj;
+    result["format"] = "assertion";
+    // no result["language"] as not a "sequence" --> maybe remove this also from sequent? don't know
+    // no result["name"] too as assertions/sequents has no given names
+    result["assertion"] = {}; // notice putting "assertion" and not "assertions"
+    result["named-formulas"] = {}; // possibly many formulas will be linked and thus many declarations too
+    result["declarations"] = {};
+    let assertion = yield ipfsGetObj(cidObj);
+    if (verifySignature(assertion)) { // should we verify the assertion type?
+        let assertionOutput = yield processAssertion(assertion, result);
+        result["assertion"] = assertionOutput;
     }
     else {
-        entry["cidFormula"] = obj["conclusion"]["/"]; // cid of named formula - could change it to raw formula
-        let formula = yield ipfsGetObj(namedConclusion["formula"]["/"]);
-        entry["formula"] = formula["formula"];
-        entry["SigmaFormula"] = formula["Sigma"];
-        entry["sequents"] = [];
+        console.log("ERROR: Assertion not verified");
+        process.exit(1);
     }
-    let sequent = {};
-    sequent["lemmas"] = yield unfoldLemmas(lemmas);
-    if (signer != "") {
-        let keystore = JSON.parse(fs.readFileSync(keystorepath));
-        let fingerPrint;
-        if (keystore[signer]) {
-            fingerPrint = keystore[signer];
+});
+let getSequence = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
+    result["output-for"] = cidObj;
+    result["format"] = "sequence";
+    result["name"] = obj["name"];
+    result["assertions"] = [];
+    result["named-formulas"] = {};
+    result["declarations"] = {};
+    let assertionsLinks = obj["assertions"]; // a sequence is a collection of assertions
+    for (let link of assertionsLinks) {
+        let assertion = yield ipfsGetObj(link["/"]);
+        if (verifySignature(assertion)) { // should we verify the assertion type?
+            let assertionOutput = yield processAssertion(assertion, result);
+            result["assertions"].push(assertionOutput);
         }
         else {
-            fingerPrint = crypto.createHash('sha256').update(signer).digest('hex');
-            keystore[signer] = fingerPrint;
-            fs.writeFileSync(keystorepath, JSON.stringify(keystore));
-        }
-        sequent["signer"] = fingerPrint;
-    }
-    entry["sequents"].push(sequent);
-    result[theoremName] = entry;
-});
-let processSequence = (obj, result) => __awaiter(void 0, void 0, void 0, function* () {
-    let sequentsLinks = obj["sequents"]; // sequents or assertions
-    for (let link of sequentsLinks) {
-        let entry = yield ipfsGetObj(link["/"]);
-        if (isAssertion(entry)) {
-            if (verifySignature(entry)) {
-                let sequent = yield ipfsGetObj(entry["sequent"]["/"]);
-                yield processSequent(sequent, result, entry["agent"]);
-            }
-            else {
-                console.log("ERROR: Assertion not verified");
-                process.exit(1);
-            }
-        }
-        else if (isSequent(entry)) {
-            yield processSequent(entry, result, "");
-        }
-    }
-});
-let unfoldLemmas = (lemmas) => __awaiter(void 0, void 0, void 0, function* () {
-    // fix to add checks
-    let lemmaFormulaObjects = [];
-    for (let lemma of lemmas) {
-        let namedformulaObject = yield ipfsGetObj(lemma["/"]);
-        let formulaObject = yield ipfsGetObj(namedformulaObject["formula"]["/"]);
-        lemmaFormulaObjects.push({ "name": namedformulaObject["name"], "cidFormula": lemma["/"],
-            "formula": formulaObject["formula"], "SigmaFormula": formulaObject["Sigma"] });
-    }
-    return lemmaFormulaObjects;
-});
-let ipfsGetObj = (cid) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        let cmd = "ipfs dag get " + cid + " > " + cid + ".json";
-        execSync(cmd, { encoding: 'utf-8' });
-        let obj = JSON.parse(fs.readFileSync(cid + ".json"));
-        fs.unlinkSync(cid + ".json");
-        return obj;
-    }
-    catch (error) {
-        console.error("ERROR: getting object from ipfs failed");
-        return {};
-    }
-});
-let ensureFullDAG = (cid) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        //test if it exists locally / or tries to retrieve the missing links in case the ipfs daemon is activated
-        let cmd = "ipfs dag export -p " + cid + " > tmpp.car";
-        // for now : causes a problem if we use an address with slashes "/" since ipfs export doesn't support it currently
-        console.log("ipfs daemon working on retrieving DAG .. Please be patient ..");
-        execSync(cmd, { encoding: 'utf-8' }); // this fails if there are missing links from the local ipfs repo / or unsuccessful to retrieve in case the ipfs daemon is activated
-        fs.unlink('tmpp.car', (err) => {
-            if (err)
-                throw err;
-        });
-    }
-    catch (err) {
-        console.log("There are missing links that were not found in the local ipfs cache OR the ipfs daemon (if activated) has not been able to find them, trying to retrieve them from the specified gateway ..");
-        let config = JSON.parse(fs.readFileSync(configpath));
-        let gateway;
-        if (config["my-gateway"])
-            gateway = config["my-gateway"];
-        else {
-            console.log("ERROR: gateway should be specified as trying to retreive data through it .. ");
-            process.exit(1);
-        }
-        let url = gateway + "/api/v0/dag/export?arg=" + cid;
-        //let result = await axios.get(url)
-        // problem here: we need to return the result as a stream to properly create the .car file from it -> axios not sufficient
-        try {
-            const streamPipeline = util.promisify(stream.pipeline);
-            const response = yield fetch(url);
-            if (!response.ok)
-                throw new Error(`unexpected response ${response.statusText}`);
-            yield streamPipeline(response.body, fs.createWriteStream('tmpp.car'));
-            //fs.writeFileSync("tmpp.car", response.body)
-            execSync("ipfs dag import tmpp.car", { encoding: 'utf-8' });
-            fs.unlink('tmpp.car', (err) => {
-                if (err)
-                    throw err;
-            });
-        }
-        catch (err) {
-            console.log(err);
+            console.log("ERROR: Assertion not verified");
             process.exit(1);
         }
     }
 });
-let isAssertion = (obj) => {
-    if (Object.keys(obj).length == 4 && "format" in obj && obj["format"] == "assertion") {
-        return ("agent" in obj && "sequent" in obj && "signature" in obj);
-    }
-    return false;
-};
-let isSequent = (obj) => {
-    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "sequent") {
-        return ("lemmas" in obj && "conclusion" in obj);
-    }
-    return false;
-};
-let isSequence = (obj) => {
-    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "sequence") {
-        return ("name" in obj && "sequents" in obj);
-    }
-    return false;
-};
-let isFormula = (obj) => {
-    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "formula") {
-        return ("formula" in obj && "Sigma" in obj);
-    }
-    return false;
-};
-let isNamedFormula = (obj) => {
-    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "named-formula") {
-        return ("name" in obj && "formula" in obj);
-    }
-    return false;
-};
-let verifySignature = (assertion) => {
-    let signature = assertion["signature"];
-    let claimedPublicKey = assertion["agent"];
-    // the data to verify : here it's the asset's cid in the object
-    let dataToVerify = assertion["sequent"]["/"];
-    const verify = crypto.createVerify('SHA256');
-    verify.write(dataToVerify);
-    verify.end();
-    let signatureVerified = verify.verify(claimedPublicKey, signature, 'hex');
-    return signatureVerified;
-};
 module.exports = { getCommand };

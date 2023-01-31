@@ -3,7 +3,7 @@ const fs = require('fs');
 const crypt = require('crypto');
 //const { configpath, confdirpath, keystorepath, profilespath } = require('./initial-vals')
 const initialVals = require("./initial-vals");
-const { configpath, confdirpath, keystorepath, profilespath } = initialVals;
+const { configpath, confdirpath, keystorepath, profilespath, allowlistpath } = initialVals;
 let setup = () => {
     // try to read ~/.config/w3proof-dispatch/config.json --> create if doesn't exist
     if (!fs.existsSync(configpath)) {
@@ -19,6 +19,9 @@ let setup = () => {
     }
     if (!fs.existsSync(profilespath)) {
         fs.writeFileSync(profilespath, JSON.stringify({}));
+    }
+    if (!fs.existsSync(allowlistpath)) {
+        fs.writeFileSync(allowlistpath, JSON.stringify([]));
     }
 };
 let keygen = (profileName) => {
@@ -88,9 +91,21 @@ let setgateway = (gateway) => {
         console.log(err);
     }
 };
+let trustagent = (agent) => {
+    let allowlistFile = fs.readFileSync(allowlistpath);
+    let allowList = JSON.parse(allowlistFile);
+    allowList.push(agent);
+    allowList = Array.from(new Set(allowList)); // agent listed only once
+    try {
+        fs.writeFileSync(allowlistpath, JSON.stringify(allowList));
+    }
+    catch (err) {
+        console.log(err);
+    }
+};
 let listconfig = () => {
     let configFile = fs.readFileSync(configpath);
     let config = JSON.parse(configFile);
     console.log(config);
 };
-module.exports = { setup, keygen, setweb3token, setgateway, listconfig };
+module.exports = { setup, keygen, setweb3token, setgateway, trustagent, listconfig };
