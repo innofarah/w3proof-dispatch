@@ -77,11 +77,11 @@ let publishCommand = (inputPath, target) => __awaiter(void 0, void 0, void 0, fu
             cid = yield publishAssertion(assertionObj, input);
             console.log("published assertion object of cid: " + cid);
         }
-        else if (format == "sequence") { // sequence of assertions
-            let nameSequence = input["name"];
-            let assertionsObj = input["assertions"];
-            cid = yield publishSequence(assertionsObj, input, nameSequence);
-            console.log("published sequence (of assertions) object of cid: " + cid);
+        else if (format == "collection") { // collection of links to global objects
+            let name = input["name"];
+            let elements = input["elements"];
+            cid = yield publishCollection(name, elements, input);
+            console.log("published collection object of cid: " + cid);
         }
         else {
             console.error(new Error("unknown input format"));
@@ -343,8 +343,6 @@ let publishAssertion = (assertionObj, input) => __awaiter(void 0, void 0, void 0
                 "production": production,
                 "annotation": annotation
             };
-            console.log("entered here");
-            console.log(annotatedProductionObj);
             cidStatement = yield publishAnnotatedProduction(annotatedProductionObj, input);
         }
     }
@@ -374,18 +372,42 @@ let publishAssertion = (assertionObj, input) => __awaiter(void 0, void 0, void 0
         process.exit(0);
     }
 });
-let publishSequence = (assertionsObj, input, nameSequence) => __awaiter(void 0, void 0, void 0, function* () {
-    let assertionsLinks = [];
-    for (let assertionObj of assertionsObj) {
-        let cidAssertion = yield publishAssertion(assertionObj, input);
-        assertionsLinks.push({ "/": cidAssertion });
+// also needs more checking
+let publishGeneric = (element, input) => __awaiter(void 0, void 0, void 0, function* () {
+    let cid = "";
+    let actualElement = element["element"];
+    if (element["format"] == "declaration")
+        cid = yield publishDeclaration(actualElement);
+    else if (element["format"] == "annotated-declaration")
+        cid = yield publishAnnotatedDeclaration(actualElement);
+    else if (element["format"] == "formula")
+        cid = yield publishFormula(actualElement, input);
+    else if (element["format"] == "annotated-formula")
+        cid = yield publishAnnotatedFormula(actualElement, input);
+    else if (element["format"] == "sequent")
+        cid = yield publishSequent(actualElement, input);
+    else if (element["format"] == "annotated-sequent")
+        cid = yield publishAnnotatedSequent(actualElement, input);
+    else if (element["format"] == "production")
+        cid = yield publishProduction(actualElement, input);
+    else if (element["format"] == "annotated-production")
+        cid = yield publishAnnotatedProduction(actualElement, input);
+    else if (element["format"] == "assertion")
+        cid = yield publishAssertion(actualElement, input);
+    return cid;
+});
+let publishCollection = (name, elements, input) => __awaiter(void 0, void 0, void 0, function* () {
+    let elementsLinks = [];
+    for (let element of elements) {
+        let cidElement = yield publishGeneric(element, input);
+        elementsLinks.push({ "/": cidElement });
     }
-    let sequenceGlobal = {
-        "format": "sequence",
-        "name": nameSequence,
-        "assertions": assertionsLinks
+    let collectionGlobal = {
+        "format": "collection",
+        "name": name,
+        "elements": elementsLinks
     };
-    let cidSequence = yield ipfsAddObj(sequenceGlobal);
-    return cidSequence;
+    let cidCollection = yield ipfsAddObj(collectionGlobal);
+    return cidCollection;
 });
 module.exports = { publishCommand };
