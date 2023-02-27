@@ -11,10 +11,10 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 const fs = require('fs');
 const { execSync } = require('child_process');
 const crypto = require('crypto');
-const { Web3Storage } = require('web3.storage');
-const { CarReader } = require('@ipld/car');
 const initialVals = require("./initial-vals");
-const { configpath, profilespath } = initialVals;
+const { configpath, toolprofilespath, agentprofilespath } = initialVals;
+const utilities = require("./utilities");
+const { ipfsAddObj, publishDagToCloud } = utilities;
 //let publishedNamedFormulas: { [key: string]: string } = {}
 //let publishedFormulas: string[] = []
 //let publishedSequents: string[] = []
@@ -37,20 +37,40 @@ let publishCommand = (inputPath, target) => __awaiter(void 0, void 0, void 0, fu
             cid = yield publishDeclaration(declarationObj);
             console.log("published declaration object of cid: " + cid);
         }
+        else if (format == "annotated-declaration") {
+            let annotatedDeclarationObj = input["annotated-declaration"];
+            cid = yield publishAnnotatedDeclaration(annotatedDeclarationObj);
+            console.log("published annotated declaration object of cid: " + cid);
+        }
         else if (format == "formula") {
             let formulaObj = input["formula"];
             cid = yield publishFormula(formulaObj, input);
             console.log("published formula object of cid: " + cid);
         }
-        else if (format == "named-formula") {
-            let namedFormulaObj = input["named-formula"];
-            cid = yield publishNamedFormula(namedFormulaObj, input);
-            console.log("published named formula object of cid: " + cid);
+        else if (format == "annotated-formula") {
+            let annotatedFormulaObj = input["annotated-formula"];
+            cid = yield publishAnnotatedFormula(annotatedFormulaObj, input);
+            console.log("published annotated formula object of cid: " + cid);
         }
         else if (format == "sequent") {
             let sequentObj = input["sequent"];
             cid = yield publishSequent(sequentObj, input);
             console.log("published sequent object of cid: " + cid);
+        }
+        else if (format == "annotated-sequent") {
+            let annotatedSequentObj = input["annotated-sequent"];
+            cid = yield publishAnnotatedSequent(annotatedSequentObj, input);
+            console.log("published annotated sequent object of cid: " + cid);
+        }
+        else if (format == "production") {
+            let productionObj = input["production"];
+            cid = yield publishProduction(productionObj, input);
+            console.log("published production object of cid: " + cid);
+        }
+        else if (format == "annotated-production") {
+            let annotatedProductionObj = input["annotated-production"];
+            cid = yield publishAnnotatedProduction(annotatedProductionObj, input);
+            console.log("published annotated production object of cid: " + cid);
         }
         else if (format == "assertion") {
             let assertionObj = input["assertion"];
@@ -75,134 +95,271 @@ let publishCommand = (inputPath, target) => __awaiter(void 0, void 0, void 0, fu
         console.error(error);
     }
 });
+// !!!!!!!!!!!! should add more safety checks - do later (for all the publishing functions)
 let publishDeclaration = (declarationObj) => __awaiter(void 0, void 0, void 0, function* () {
     // consider an entry in "declaration" (like "fib": ..) in the input file to have two possible values: either [string] or "ipld:ciddeclarationobject"
     // use ipfsAddObj to add the declarations end object
-    let cidDeclaration = "";
     let language = declarationObj["language"];
     let content = declarationObj["content"];
-    if (typeof content == "string") {
-        if (content.startsWith("ipld:")) {
-            let cidObj = content.split(":")[1];
-            //publishedDeclarations[name] = cidObj
-            cidDeclaration = cidObj;
-        }
-        else { // error (wrong format unexpected)
-        }
-    }
-    else if (content.length > 0 && typeof content[0] == "string") { // if type is [string] (fix this, now for testing)
-        let cidContent = yield ipfsAddObj(content);
-        let declarationsObj = {
-            "format": "declaration",
-            "language": language,
-            "content": { "/": cidContent }
-        };
-        let cidObj = yield ipfsAddObj(declarationsObj);
-        //publishedDeclarations[name] = cidObj
-        cidDeclaration = cidObj;
-    }
-    else { // error unexpected format
-    }
+    let cidLanguage = "", cidContent = "", cidDeclaration = "";
+    if (typeof language == "string" && language.startsWith("ipld:"))
+        cidLanguage = language.split(":")[1]; // should add checking here that cid refers to correct type (in general not just here)
+    else
+        cidLanguage = yield ipfsAddObj(language);
+    if (typeof content == "string" && content.startsWith("ipld:"))
+        cidContent = content.split(":")[1];
+    else
+        cidContent = yield ipfsAddObj(content);
+    let declarationGlobal = {
+        "format": "declaration",
+        "language": { "/": cidLanguage },
+        "content": { "/": cidContent }
+    };
+    let cidObj = yield ipfsAddObj(declarationGlobal);
+    //publishedDeclarations[name] = cidObj
+    cidDeclaration = cidObj;
     return cidDeclaration;
+});
+// change into annotated  -> what is annotations"?
+let publishAnnotatedDeclaration = (annotatedDeclarationObj) => __awaiter(void 0, void 0, void 0, function* () {
+    let declaration = annotatedDeclarationObj["declaration"];
+    let annotation = annotatedDeclarationObj["annotation"];
+    let cidDeclaration = "", cidAnnotation = "";
+    if (typeof declaration == "string" && declaration.startsWith("ipld:"))
+        cidDeclaration = declaration.split(":")[1];
+    else {
+        cidDeclaration = yield publishDeclaration(declaration);
+    }
+    if (typeof annotation == "string" && annotation.startsWith("ipld:"))
+        cidAnnotation = annotation.split(":")[1];
+    else {
+        cidAnnotation = yield ipfsAddObj(annotation);
+    }
+    let annotatedDeclarationGlobal = {
+        "format": "annotated-declaration",
+        "declaration": { "/": cidDeclaration },
+        "annotation": { "/": cidAnnotation }
+    };
+    let cid = yield ipfsAddObj(annotatedDeclarationGlobal);
+    //publishedNamedFormulas[name] = cid
+    return cid;
 });
 let publishFormula = (formulaObj, input) => __awaiter(void 0, void 0, void 0, function* () {
     let language = formulaObj["language"];
     let content = formulaObj["content"];
-    let declarationName = formulaObj["declaration"];
-    let declarationCid = yield publishDeclaration(input["declarations"][declarationName]);
-    let cidContent = yield ipfsAddObj(content);
+    let cidLanguage = "", cidContent = "";
+    if (typeof language == "string" && language.startsWith("ipld:"))
+        cidLanguage = language.split(":")[1];
+    else
+        cidLanguage = yield ipfsAddObj(language);
+    if (typeof content == "string" && content.startsWith("ipld:"))
+        cidContent = content.split(":")[1];
+    else
+        cidContent = yield ipfsAddObj(content);
+    let declarationNames = formulaObj["declarations"];
+    let declarationLinks = [];
+    for (let declarationName of declarationNames) {
+        let declarationCid = "";
+        if (declarationName.startsWith("ipld:"))
+            declarationCid = declarationName.split(":")[1];
+        else
+            declarationCid = yield publishDeclaration(input["declarations"][declarationName]);
+        declarationLinks.push({ "/": declarationCid });
+    }
     let formulaGlobal = {
         "format": "formula",
-        "language": language,
+        "language": { "/": cidLanguage },
         "content": { "/": cidContent },
-        "declaration": { "/": declarationCid }
+        "declarations": declarationLinks
     };
     let cid = yield ipfsAddObj(formulaGlobal);
     //publishedFormulas.push(cid)
     return cid;
 });
-let publishNamedFormula = (namedFormulaObj, input) => __awaiter(void 0, void 0, void 0, function* () {
-    let name = namedFormulaObj["name"];
-    let language = namedFormulaObj["language"];
-    let content = namedFormulaObj["content"];
-    let declarationName = namedFormulaObj["declaration"];
-    let formulaObj = {
-        "language": language,
-        "content": content,
-        "declaration": declarationName
-    };
-    let cidFormula = yield publishFormula(formulaObj, input);
-    let namedFormulaGlobal = {
-        "format": "named-formula",
-        "name": name,
+// change into annotated -> ...
+let publishAnnotatedFormula = (annotatedFormulaObj, input) => __awaiter(void 0, void 0, void 0, function* () {
+    let formula = annotatedFormulaObj["formula"];
+    let annotation = annotatedFormulaObj["annotation"];
+    let cidFormula = "", cidAnnotation = "";
+    if (typeof formula == "string" && formula.startsWith("ipld:"))
+        cidFormula = formula.split(":")[1];
+    else {
+        cidFormula = yield publishFormula(formula, input);
+    }
+    if (typeof annotation == "string" && annotation.startsWith("ipld:"))
+        cidAnnotation = annotation.split(":")[1];
+    else {
+        cidAnnotation = yield ipfsAddObj(annotation);
+    }
+    let annotatedFormulaGlobal = {
+        "format": "annotated-formula",
         "formula": { "/": cidFormula },
+        "annotation": { "/": cidAnnotation }
     };
-    let cid = yield ipfsAddObj(namedFormulaGlobal);
+    let cid = yield ipfsAddObj(annotatedFormulaGlobal);
     //publishedNamedFormulas[name] = cid
     return cid;
 });
 let publishSequent = (sequentObj, input) => __awaiter(void 0, void 0, void 0, function* () {
     let conclusionName = sequentObj["conclusion"];
-    let conclusionObj = input["named-formulas"][conclusionName];
-    let conclusionNamedObj = {
-        "name": conclusionName,
-        "language": conclusionObj["language"],
-        "content": conclusionObj["content"],
-        "declaration": conclusionObj["declaration"]
-    };
-    let cidConclusion = yield publishNamedFormula(conclusionNamedObj, input);
-    let lemmasNames = sequentObj["lemmas"];
-    let lemmasIpfs = [];
-    for (let lemma of lemmasNames) {
-        let cidLemma = "";
-        if (lemma.startsWith("ipld:")) {
+    let cidConclusion = "";
+    if (conclusionName.startsWith("ipld:"))
+        cidConclusion = conclusionName.split(":")[1];
+    else {
+        let conclusionObj = input["formulas"][conclusionName];
+        /*let conclusionGlobal = {
+            "language": conclusionObj["language"],
+            "content": conclusionObj["content"],
+            "declarations": conclusionObj["declarations"]
+        }*/
+        cidConclusion = yield publishFormula(conclusionObj, input);
+    }
+    let dependenciesNames = sequentObj["dependencies"];
+    let dependenciesIpfs = [];
+    for (let dependency of dependenciesNames) {
+        let ciddependency = "";
+        if (dependency.startsWith("ipld:")) {
             // assuming the cids in "lemmas" should refer to a "formula" object
             //(if we remove the .thc generation and replace it with generation of the output format.json file produced by w3proof-dispatch get)
-            cidLemma = lemma.split(":")[1];
+            ciddependency = dependency.split(":")[1];
             // should we test that the cid refers to a formula object here? (check later where it's best to do the cid objects type checking?)
         }
         else {
-            let lemmaObj = input["named-formulas"][lemma];
-            let lemmaNamedObj = {
-                "name": lemma,
-                "language": lemmaObj["language"],
-                "content": lemmaObj["content"],
-                "declaration": lemmaObj["declaration"]
-            };
-            cidLemma = yield publishNamedFormula(lemmaNamedObj, input);
+            let dependencyObj = input["formulas"][dependency];
+            /*let dependencyGlobal = {
+                "language": dependencyObj["language"],
+                "content": dependencyObj["content"],
+                "declaration": dependencyObj["declaration"]
+            }*/
+            ciddependency = yield publishFormula(dependencyObj, input);
         }
-        lemmasIpfs.push({ "/": cidLemma });
+        dependenciesIpfs.push({ "/": ciddependency });
     }
     let sequentGlobal = {
         "format": "sequent",
-        "lemmas": lemmasIpfs,
+        "dependencies": dependenciesIpfs,
         "conclusion": { "/": cidConclusion }
     };
     let cid = yield ipfsAddObj(sequentGlobal);
     //publishedSequents.push(cid)
     return cid;
 });
-let publishAssertion = (assertionObj, input) => __awaiter(void 0, void 0, void 0, function* () {
-    let profileName = assertionObj["profile"];
-    let conclusion = assertionObj["conclusion"];
-    let lemmas = assertionObj["lemmas"];
-    let sequentObj = {
-        "conclusion": conclusion,
-        "lemmas": lemmas
+let publishAnnotatedSequent = (annotatedSequentObj, input) => __awaiter(void 0, void 0, void 0, function* () {
+    let sequent = annotatedSequentObj["sequent"];
+    let annotation = annotatedSequentObj["annotation"];
+    let cidSequent = "", cidAnnotation = "";
+    if (typeof sequent == "string" && sequent.startsWith("ipld:"))
+        cidSequent = sequent.split(":")[1];
+    else {
+        cidSequent = yield publishSequent(sequent, input);
+    }
+    if (typeof annotation == "string" && annotation.startsWith("ipld:"))
+        cidAnnotation = annotation.split(":")[1];
+    else {
+        cidAnnotation = yield ipfsAddObj(annotation);
+    }
+    let annotatedSequentGlobal = {
+        "format": "annotated-sequent",
+        "sequent": { "/": cidSequent },
+        "annotation": { "/": cidAnnotation }
     };
-    let cidSequent = yield publishSequent(sequentObj, input);
+    let cid = yield ipfsAddObj(annotatedSequentGlobal);
+    //publishedNamedFormulas[name] = cid
+    return cid;
+});
+let publishProduction = (productionObj, input) => __awaiter(void 0, void 0, void 0, function* () {
+    let tool = productionObj["tool"];
+    let sequent = productionObj["sequent"];
+    let cidTool = "", cidSequent = "";
+    // add spec and checks later that sequent is "ipld:.." or {..}
+    if (typeof sequent == "string" && sequent.startsWith("ipld:"))
+        cidSequent = sequent.split(":")[1];
+    else {
+        cidSequent = yield publishSequent(sequent, input);
+    }
+    if (typeof tool == "string" && tool.startsWith("ipld:"))
+        cidTool = tool.split(":")[1];
+    else {
+        try {
+            let toolProfiles = JSON.parse(fs.readFileSync(toolprofilespath));
+            if (toolProfiles[tool]) {
+                cidTool = toolProfiles[tool]["tool"];
+            }
+            else
+                throw new Error("ERROR: given toolProfile name does not exist");
+        }
+        catch (error) {
+            console.error(error);
+            process.exit(0);
+        }
+    }
+    let productionGlobal = {
+        "format": "production",
+        "sequent": { "/": cidSequent },
+        "tool": { "/": cidTool }
+    };
+    let cidProduction = yield ipfsAddObj(productionGlobal);
+    return cidProduction;
+});
+let publishAnnotatedProduction = (annotatedProductionObj, input) => __awaiter(void 0, void 0, void 0, function* () {
+    let production = annotatedProductionObj["production"];
+    let annotation = annotatedProductionObj["annotation"];
+    let cidProduction = "", cidAnnotation = "";
+    if (typeof production == "string" && production.startsWith("ipld:"))
+        cidProduction = production.split(":")[1];
+    else {
+        cidProduction = yield publishProduction(production, input);
+    }
+    if (typeof annotation == "string" && annotation.startsWith("ipld:"))
+        cidAnnotation = annotation.split(":")[1];
+    else {
+        cidAnnotation = yield ipfsAddObj(annotation);
+    }
+    let annotatedProductionGlobal = {
+        "format": "annotated-production",
+        "production": { "/": cidProduction },
+        "annotation": { "/": cidAnnotation }
+    };
+    let cid = yield ipfsAddObj(annotatedProductionGlobal);
+    //publishedNamedFormulas[name] = cid
+    return cid;
+});
+// refer to either production or annotatedproduction. how
+let publishAssertion = (assertionObj, input) => __awaiter(void 0, void 0, void 0, function* () {
+    let agentProfileName = assertionObj["agent"];
+    let statement = assertionObj["statement"];
+    let cidStatement = "";
+    if (typeof statement == "string" && statement.startsWith("ipld:"))
+        cidStatement = statement.split(":")[1];
+    else {
+        // should do additional checking
+        if (statement["format"] == "production") {
+            cidStatement = yield publishProduction(statement["production"], input);
+        }
+        else if (statement["format"] == "annotated-production") {
+            let production = statement["production"];
+            let annotation = statement["annotation"];
+            let annotatedProductionObj = {
+                "production": production,
+                "annotation": annotation
+            };
+            console.log("entered here");
+            console.log(annotatedProductionObj);
+            cidStatement = yield publishAnnotatedProduction(annotatedProductionObj, input);
+        }
+    }
     try {
-        let profiles = JSON.parse(fs.readFileSync(profilespath));
-        if (profiles[profileName]) {
-            let profile = profiles[profileName];
+        let agentProfiles = JSON.parse(fs.readFileSync(agentprofilespath));
+        if (agentProfiles[agentProfileName]) {
+            let agentProfile = agentProfiles[agentProfileName];
             const sign = crypto.createSign('SHA256');
-            sign.write(cidSequent);
+            sign.write(cidStatement);
             sign.end();
-            const signature = sign.sign(profile["private-key"], 'hex');
+            const signature = sign.sign(agentProfile["private-key"], 'hex');
             let assertionGlobal = {
                 "format": "assertion",
-                "agent": profile["public-key"],
-                "sequent": { "/": cidSequent },
+                "agent": agentProfile["public-key"],
+                "statement": { "/": cidStatement },
                 "signature": signature
             };
             let cidAssertion = yield ipfsAddObj(assertionGlobal);
@@ -230,252 +387,5 @@ let publishSequence = (assertionsObj, input, nameSequence) => __awaiter(void 0, 
     };
     let cidSequence = yield ipfsAddObj(sequenceGlobal);
     return cidSequence;
-});
-/*let publishSequenceCommand = async (input: {}) => { // expected input is a json having the input-format for "sequence"
-    try {
-        let givenSequenceName = input["input-for"]
-        
-        let language = input["language"]
-
-        let profile = input["profile"]
-
-        let sequents = input["sequents"]
-
-        let namedFormulas = input["named-formulas"]
-
-        let declarations = input["declarations"]
-
-        // publishing declarations -> then named-formulas -> then sequents -> then assertions -> then sequence
-
-        for (let decName of Object.keys(declarations)) {
-            await publishDeclarations(language, decName, declarations[decName]["content"])
-        }
-
-        for (let name of Object.keys(namedFormulas)) {
-            await publishFormula(language, name, namedFormulas[name]["content"], namedFormulas[name]["declarations"])
-        }
-
-        for (let sequent of sequents) {
-            await publishSequent(sequent)
-        }
-
-        for (let sequentCid of publishedSequents) {
-
-            await publishAssertion(sequentCid, profile)
-        }
-
-        let sequenceCid = await publishSequence(givenSequenceName, publishedAssertions) //for now publish sequence as composed of assertions signed by the same profile
-        console.log("Input from Prover Published: The root cid of the published sequence of assertions by profile: " + profile + " is " + sequenceCid)
-
-        // if cloud (global), publish the final sequence cid (dag) through the web3.storage api
-        // should find first what is the "target" in the profile stored information (locally in the user's .config/.../profiles.json)
-
-        try {
-            let target = JSON.parse(fs.readFileSync(profilespath))[profile]["target"]
-            if (target == "cloud") {
-                publishDagToCloud(sequenceCid)
-            }
-        } catch(error) {
-            console.error(error)
-        }
-    } catch (error) {
-        console.error(error)
-    }
-}
-
-let publishDeclarations = async (language: string, name: string, declarations: [string] | string) => {
-    // consider an entry in "declarations" (like "fib": ..) in the input file to have two possible values: either [string] or "ipld:ciddeclarationobjcet"
-    // use ipfsAddFile to add what's in content (if [string]),
-    // use ipfsAddObj to add the declarations end object
-
-    if (typeof declarations == "string") {
-        if (declarations.startsWith("ipld:")) {
-
-            let cidObj = declarations.split(":")[1]
-            publishedDeclarations[name] = cidObj
-
-        }
-
-        else { // error (wrong format unexpected)
-
-        }
-    }
-    else if (declarations.length > 0 && typeof declarations[0] == "string") { // if type is [string] (fix this, now for testing)
-        let cidContent = await ipfsAddObj(declarations)
-
-        let declarationsObj: declarations = {
-            "format": "declarations",
-            "language": language,
-            "content": { "/": cidContent }
-        }
-
-        let cidObj = await ipfsAddObj(declarationsObj)
-        publishedDeclarations[name] = cidObj
-    }
-
-    else { // error unexpected format
-
-    }
-}
-
-let publishFormula = async (language: string, formulaName: string, formula: string, declarations: string) => {
-    let cidFormula = await ipfsAddObj(formula)
-
-    let formulaObj: formula = {
-        "format": "formula",
-        "language": language,
-        "content": { "/": cidFormula },
-        "declarations": { "/": publishedDeclarations[declarations] }
-    }
-
-    let cid = await ipfsAddObj(formulaObj)
-
-    let formulaNamed: namedFormula = {
-        "format": "named-formula",
-        "name": formulaName,
-        "formula": { "/": cid }
-    }
-
-    let cidNamed = await ipfsAddObj(formulaNamed)
-    publishedFormulas[formulaName] = cidNamed
-}
-
-let publishSequent = async (sequent: {}) => {
-
-    let conclusion = sequent["conclusion"]
-    let lemmas = sequent["lemmas"]
-
-    let lemmasIpfs = []
-
-    for (let lemma of lemmas) {
-        if (lemma.startsWith("ipld:")) {
-            // assuming the cids in "lemmas" should refer to a "formula" object
-            //(if we remove the .thc generation and replace it with generation of the output format.json file produced by w3proof-dispatch get)
-
-            let cidFormula = lemma.split(":")[1]
-            // should we test that the cid refers to a formula object here? (check later where it's best to do the cid objects type checking?)
-            lemmasIpfs.push({ "/": cidFormula })
-
-            // allowed cids: sequent/assertion and sequence types
-        }
-        else {
-            lemmasIpfs.push({ "/": publishedFormulas[lemma] })
-        }
-    }
-
-
-    let seq = {
-        "format": "sequent",
-        "lemmas": lemmasIpfs,
-        "conclusion": { "/": publishedFormulas[conclusion] }
-    }
-
-    let cid = await ipfsAddObj(seq)
-    publishedSequents.push(cid)
-}
-
-let publishAssertion = async (sequentCid: string, profileName: string) => {
-    try {
-        let profiles = JSON.parse(fs.readFileSync(profilespath))
-        if (profiles[profileName]) {
-            let profile = profiles[profileName]
-
-            const sign = crypto.createSign('SHA256')
-            sign.write(sequentCid)
-            sign.end()
-            const signature = sign.sign(profile["private-key"], 'hex')
-
-            let assertion: assertion = {
-                "format": "assertion",
-                "agent": profile["public-key"],
-                "sequent": { "/": sequentCid },
-                "signature": signature
-            }
-
-            let assertionCid = await ipfsAddObj(assertion)
-            publishedAssertions.push(assertionCid)
-        }
-        else throw new Error("ERROR: given profile name does not exist")
-    } catch (error) {
-        console.error(error);
-        process.exit(0)
-    }
-}
-
-let publishSequence = async (sequenceName: string, assertionsCids: string[]) => {
-    let assertionsLinks = []
-    for (let cid of assertionsCids) {
-        assertionsLinks.push({ "/": cid })
-    }
-
-    let sequence = {
-        "format": "sequence",
-        "name": sequenceName,
-        "assertions": assertionsLinks
-    }
-
-    let sequenceCid = await ipfsAddObj(sequence)
-    return sequenceCid
-}*/
-// --------------------------
-// for adding to ipfs (+cloud)
-// --------------------------
-let ipfsAddObj = (obj) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        fs.writeFileSync("tmpJSON.json", JSON.stringify(obj));
-        let addcmd = "ipfs dag put tmpJSON.json --pin";
-        let output = execSync(addcmd, { encoding: 'utf-8' });
-        fs.unlinkSync('tmpJSON.json');
-        return output.substring(0, output.length - 1);
-    }
-    catch (error) {
-        console.error("ERROR: adding object to ipfs failed");
-        return "";
-    }
-});
-// subject to change, check if adding as file is the correct (and better) thing to do for declarations content and formula string
-/*let ipfsAddFile = async (data: string) => {
-    try {
-        fs.writeFileSync("tmpFile.txt", data)
-        let addcmd = "ipfs add tmpFile.txt --cid-version 1 --pin"
-        let output = execSync(addcmd, { encoding: 'utf-8' })
-
-        fs.unlinkSync('tmpFile.txt')
-        //return output.substring(0, output.length - 1)
-        return output.split(" ")[1] // not really best way to do it (must us nodjs ipfs api not cmd)
-    } catch (error) {
-        console.error("ERROR: adding object to ipfs failed");
-        return ""
-    }
-}*/
-let publishDagToCloud = (cid) => __awaiter(void 0, void 0, void 0, function* () {
-    let web3Token, web3Client;
-    try {
-        let config = JSON.parse(fs.readFileSync(configpath));
-        if (config["my-web3.storage-api-token"]
-            && config["my-web3.storage-api-token"] != "**insert your token here**") {
-            web3Token = config["my-web3.storage-api-token"];
-            web3Client = new Web3Storage({ token: web3Token });
-        }
-        else {
-            throw new Error("ERROR: setting a web3.storage token is required as the chosen mode for publishing is 'cloud' and not 'local'.");
-        }
-        let cmd = "ipfs dag export " + cid + " > tmpcar.car";
-        execSync(cmd, { encoding: 'utf-8' });
-        const inStream = fs.createReadStream('tmpcar.car');
-        // read and parse the entire stream in one go, this will cache the contents of
-        // the car in memory so is not suitable for large files.
-        const reader = yield CarReader.fromIterable(inStream);
-        const cid1 = yield web3Client.putCar(reader);
-        console.log("DAG successfully published to web3.storage!");
-        console.log("root cid: " + cid);
-        fs.unlink('tmpcar.car', (err) => {
-            if (err)
-                throw err;
-        });
-    }
-    catch (err) {
-        console.log(err);
-    }
 });
 module.exports = { publishCommand };

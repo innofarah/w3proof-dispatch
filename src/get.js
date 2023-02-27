@@ -21,14 +21,16 @@ const { isDeclaration, isFormula, isNamedFormula, isSequent, isAssertion, isSequ
 // etc...  
 // dispatch will produce an output for all these object types, and a consumer (prover for ex) would decide what format it reads and how it should read it.
 //let getCommand = async (cid: string, filepath) => {
+//let getCommand = async (cid: string, directoryPath) => {
+/*let outputPath
+if (Object.values(filepath).length != 0) {
+    outputPath =  Object.values(filepath)
+}
+else { // if no filepath argument(option) is given
+    outputPath = cid + ".json" // the default value for the output file path
+}*/
+// cid refers to: formula, sequent, assertion, or sequence // for now
 let getCommand = (cid, directoryPath) => __awaiter(void 0, void 0, void 0, function* () {
-    /*let outputPath
-    if (Object.values(filepath).length != 0) {
-        outputPath =  Object.values(filepath)
-    }
-    else { // if no filepath argument(option) is given
-        outputPath = cid + ".json" // the default value for the output file path
-    }*/
     let result = {};
     yield ensureFullDAG(cid);
     try {
