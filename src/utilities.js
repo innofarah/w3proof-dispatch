@@ -1,5 +1,6 @@
 "use strict";
 // in this file a lot should be added; for example, verifying that all things refered in the sequence are of the same language (check first if this is what we want?)
+// for now only check that the the object has the correct attributes (without checking the types of their values)
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -9,7 +10,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-// for now only check that the the object has the correct attributes (without checking the types of their values)
 const crypto = require('crypto');
 const fs = require('fs');
 const { execSync } = require('child_process');
@@ -25,35 +25,78 @@ let isDeclaration = (obj) => {
         return ("language" in obj && "content" in obj);
     }
 };
+let isAnnotatedDeclaration = (obj) => {
+    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "annotated-declaration") {
+        return ("declaration" in obj && "annotation" in obj);
+    }
+};
 let isFormula = (obj) => {
     if (Object.keys(obj).length == 4 && "format" in obj && obj["format"] == "formula") {
-        return ("language" in obj && "content" in obj && "declaration" in obj);
+        return ("language" in obj && "content" in obj && "declarations" in obj);
     }
     return false;
 };
-let isNamedFormula = (obj) => {
-    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "named-formula") {
-        return ("name" in obj && "formula" in obj);
+let isAnnotatedFormula = (obj) => {
+    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "annotated-formula") {
+        return ("formula" in obj && "annotation" in obj);
     }
     return false;
 };
 let isSequent = (obj) => {
     if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "sequent") {
-        return ("lemmas" in obj && "conclusion" in obj);
+        return ("dependencies" in obj && "conclusion" in obj);
+    }
+    return false;
+};
+let isAnnotatedSequent = (obj) => {
+    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "annotated-sequent") {
+        return ("sequent" in obj && "annotation" in obj);
+    }
+    return false;
+};
+let isTool = (obj) => {
+    if (Object.keys(obj).length == 2 && "format" in obj && obj["format"] == "tool") {
+        return ("content" in obj);
+    }
+    return false;
+};
+let isLanguage = (obj) => {
+    if (Object.keys(obj).length == 2 && "format" in obj && obj["format"] == "language") {
+        return ("content" in obj);
+    }
+    return false;
+};
+let isProduction = (obj) => {
+    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "production") {
+        return ("sequent" in obj && "tool" in obj);
+    }
+    return false;
+};
+let isAnnotatedProduction = (obj) => {
+    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "annotated-production") {
+        return ("production" in obj && "annotation" in obj);
     }
     return false;
 };
 let isAssertion = (obj) => {
     if (Object.keys(obj).length == 4 && "format" in obj && obj["format"] == "assertion") {
-        return ("agent" in obj && "sequent" in obj && "signature" in obj);
+        return ("agent" in obj && "statement" in obj && "signature" in obj);
     }
     return false;
 };
-let isSequence = (obj) => {
-    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "sequence") {
-        return ("name" in obj && "assertions" in obj);
+let isCollection = (obj) => {
+    if (Object.keys(obj).length == 3 && "format" in obj && obj["format"] == "collection") {
+        return ("name" in obj && "elements" in obj);
     }
     return false;
+};
+// the standard format types to publish and get
+let isOfSpecifiedTypes = (obj) => {
+    return (isDeclaration(obj) || isFormula(obj)
+        || isSequent(obj) || isProduction(obj)
+        || isAssertion(obj) || isCollection(obj)
+        || isAnnotatedDeclaration(obj) || isAnnotatedFormula(obj)
+        || isAnnotatedSequent(obj) || isAnnotatedDeclaration(obj));
 };
 let verifySignature = (assertion) => {
     let signature = assertion["signature"];
@@ -210,6 +253,8 @@ let publishDagToCloud = (cid) => __awaiter(void 0, void 0, void 0, function* () 
         console.log(err);
     }
 });
-module.exports = { isDeclaration, isFormula, isNamedFormula, isSequent, isAssertion,
-    isSequence, verifySignature, fingerPrint, inAllowList, ipfsGetObj, ensureFullDAG,
+module.exports = { isOfSpecifiedTypes, isDeclaration, isFormula, isSequent, isProduction, isAssertion,
+    isCollection, isAnnotatedDeclaration, isAnnotatedFormula, isAnnotatedSequent,
+    isAnnotatedProduction,
+    verifySignature, fingerPrint, inAllowList, ipfsGetObj, ensureFullDAG,
     ipfsAddObj, publishDagToCloud };
