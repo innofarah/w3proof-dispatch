@@ -9,8 +9,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 const fs = require('fs');
-const utilities = require("./utilities");
-const { isSequent, isAssertion, isSequence, verifySignature, fingerPrint, inAllowList, ipfsGetObj, ensureFullDAG } = utilities;
+//const { isSequent, isAssertion, isSequence,
+//    verifySignature, fingerPrint, inAllowList, ipfsGetObj, ensureFullDAG } = utilities
 let getResult = (cidFormula, assertionsList, resultUnits, path) => __awaiter(void 0, void 0, void 0, function* () {
     let result = [];
     // for the formula itself

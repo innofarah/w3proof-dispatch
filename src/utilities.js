@@ -96,13 +96,13 @@ let isOfSpecifiedTypes = (obj) => {
         || isSequent(obj) || isProduction(obj)
         || isAssertion(obj) || isCollection(obj)
         || isAnnotatedDeclaration(obj) || isAnnotatedFormula(obj)
-        || isAnnotatedSequent(obj) || isAnnotatedDeclaration(obj));
+        || isAnnotatedSequent(obj) || isAnnotatedProduction(obj));
 };
 let verifySignature = (assertion) => {
     let signature = assertion["signature"];
     let claimedPublicKey = assertion["agent"];
     // the data to verify : here it's the asset's cid in the object
-    let dataToVerify = assertion["sequent"]["/"];
+    let dataToVerify = assertion["statement"]["/"];
     const verify = crypto.createVerify('SHA256');
     verify.write(dataToVerify);
     verify.end();

@@ -12,7 +12,7 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const crypto = require('crypto');
 const initialVals = require("./initial-vals");
-const { configpath, toolprofilespath, agentprofilespath } = initialVals;
+const { configpath, toolprofilespath, languagespath, agentprofilespath } = initialVals;
 const utilities = require("./utilities");
 const { ipfsAddObj, publishDagToCloud } = utilities;
 //let publishedNamedFormulas: { [key: string]: string } = {}
@@ -103,9 +103,21 @@ let publishDeclaration = (declarationObj) => __awaiter(void 0, void 0, void 0, f
     let content = declarationObj["content"];
     let cidLanguage = "", cidContent = "", cidDeclaration = "";
     if (typeof language == "string" && language.startsWith("ipld:"))
-        cidLanguage = language.split(":")[1]; // should add checking here that cid refers to correct type (in general not just here)
-    else
-        cidLanguage = yield ipfsAddObj(language);
+        cidLanguage = language.split(":")[1];
+    else {
+        try {
+            let languages = JSON.parse(fs.readFileSync(languagespath));
+            if (languages[language]) { // assuming the cids in languages are of "format"="language" --> check later
+                cidLanguage = languages[language]["language"];
+            }
+            else
+                throw new Error("ERROR: given language record name does not exist");
+        }
+        catch (error) {
+            console.error(error);
+            process.exit(0);
+        }
+    }
     if (typeof content == "string" && content.startsWith("ipld:"))
         cidContent = content.split(":")[1];
     else
@@ -150,8 +162,20 @@ let publishFormula = (formulaObj, input) => __awaiter(void 0, void 0, void 0, fu
     let cidLanguage = "", cidContent = "";
     if (typeof language == "string" && language.startsWith("ipld:"))
         cidLanguage = language.split(":")[1];
-    else
-        cidLanguage = yield ipfsAddObj(language);
+    else {
+        try {
+            let languages = JSON.parse(fs.readFileSync(languagespath));
+            if (languages[language]) { // assuming the cids in languages are of "format"="language" --> check later
+                cidLanguage = languages[language]["language"];
+            }
+            else
+                throw new Error("ERROR: given language record name does not exist");
+        }
+        catch (error) {
+            console.error(error);
+            process.exit(0);
+        }
+    }
     if (typeof content == "string" && content.startsWith("ipld:"))
         cidContent = content.split(":")[1];
     else
@@ -282,7 +306,7 @@ let publishProduction = (productionObj, input) => __awaiter(void 0, void 0, void
     else {
         try {
             let toolProfiles = JSON.parse(fs.readFileSync(toolprofilespath));
-            if (toolProfiles[tool]) {
+            if (toolProfiles[tool]) { // assuming the cids in toolProfiles are of "format"="tool" --> check later
                 cidTool = toolProfiles[tool]["tool"];
             }
             else

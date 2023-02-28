@@ -12,7 +12,7 @@ const fs = require('fs');
 const crypt = require('crypto');
 //const { configpath, confdirpath, keystorepath, agentprofilespath } = require('./initial-vals')
 const initialVals = require("./initial-vals");
-const { configpath, confdirpath, keystorepath, agentprofilespath, toolprofilespath, allowlistpath } = initialVals;
+const { configpath, confdirpath, keystorepath, agentprofilespath, toolprofilespath, languagespath, allowlistpath } = initialVals;
 const utilities = require("./utilities");
 const { ipfsAddObj, publishDagToCloud } = utilities;
 let setup = () => {
@@ -33,6 +33,9 @@ let setup = () => {
     }
     if (!fs.existsSync(toolprofilespath)) {
         fs.writeFileSync(toolprofilespath, JSON.stringify({}));
+    }
+    if (!fs.existsSync(languagespath)) {
+        fs.writeFileSync(languagespath, JSON.stringify({}));
     }
     if (!fs.existsSync(allowlistpath)) {
         fs.writeFileSync(allowlistpath, JSON.stringify([]));
@@ -88,10 +91,30 @@ let createTool = (toolProfileName, inputType, input) => __awaiter(void 0, void 0
     let toolCid = "";
     if (inputType == "file") {
         try {
+            let data = fs.readFileSync(input, { encoding: 'utf-8' }); //assuming the data is text
+            // but maybe it's not?
+            //let data = fs.readFileSync(input)
+            let contentCid = yield ipfsAddObj(data);
+            toolCid = yield ipfsAddObj({
+                "format": "tool",
+                "content": { "/": contentCid }
+            });
+        }
+        catch (err) {
+            console.log(err);
+            process.exit(process.exitCode);
+        }
+    }
+    else if (inputType == "json") {
+        try {
             let data = JSON.parse(fs.readFileSync(input)); //assuming the data is json
             // but maybe it's not?
             //let data = fs.readFileSync(input)
-            toolCid = yield ipfsAddObj(data);
+            let contentCid = yield ipfsAddObj(data);
+            toolCid = yield ipfsAddObj({
+                "format": "tool",
+                "content": { "/": contentCid }
+            });
         }
         catch (err) {
             console.log(err);
@@ -99,7 +122,7 @@ let createTool = (toolProfileName, inputType, input) => __awaiter(void 0, void 0
         }
     }
     else if (inputType == "cid")
-        toolCid = input;
+        toolCid = input; // assuming the cid refers to a "format" = "tool" object --> check later
     let toolProfile = {
         "name": toolProfileName,
         "tool": toolCid
@@ -109,6 +132,57 @@ let createTool = (toolProfileName, inputType, input) => __awaiter(void 0, void 0
     try {
         fs.writeFileSync(toolprofilespath, JSON.stringify(toolProfiles));
         console.log("Tool profile " + toolProfileName + " created successfully!");
+    }
+    catch (err) {
+        console.log(err);
+    }
+});
+// check that cid refers to "format"="language" type --> later
+let createLanguage = (languageName, inputType, input) => __awaiter(void 0, void 0, void 0, function* () {
+    let languageCid = "";
+    if (inputType == "file") {
+        try {
+            let data = fs.readFileSync(input, { encoding: 'utf-8' }); //assuming the data is text
+            // but maybe it's not?
+            //let data = fs.readFileSync(input)
+            let contentCid = yield ipfsAddObj(data);
+            languageCid = yield ipfsAddObj({
+                "format": "language",
+                "content": { "/": contentCid }
+            });
+        }
+        catch (err) {
+            console.log(err);
+            process.exit(process.exitCode);
+        }
+    }
+    else if (inputType == "json") {
+        try {
+            let data = JSON.parse(fs.readFileSync(input)); //assuming the data is json
+            // but maybe it's not?
+            //let data = fs.readFileSync(input)
+            let contentCid = yield ipfsAddObj(data);
+            languageCid = yield ipfsAddObj({
+                "format": "language",
+                "content": { "/": contentCid }
+            });
+        }
+        catch (err) {
+            console.log(err);
+            process.exit(process.exitCode);
+        }
+    }
+    else if (inputType == "cid")
+        languageCid = input; // assuming the cid refers to a "format" = "language" object --> check later
+    let language = {
+        "name": languageName,
+        "language": languageCid
+    };
+    let languages = JSON.parse(fs.readFileSync(languagespath));
+    languages[languageName] = language;
+    try {
+        fs.writeFileSync(languagespath, JSON.stringify(languages));
+        console.log("Language record " + languageName + " created successfully!");
     }
     catch (err) {
         console.log(err);
@@ -153,4 +227,4 @@ let listconfig = () => {
     let config = JSON.parse(configFile);
     console.log(config);
 };
-module.exports = { setup, createAgent, createTool, setweb3token, setgateway, listconfig };
+module.exports = { setup, createAgent, createTool, createLanguage, setweb3token, setgateway, listconfig };
