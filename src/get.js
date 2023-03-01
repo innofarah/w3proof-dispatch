@@ -75,7 +75,7 @@ let getCommand = (cid, directoryPath) => __awaiter(void 0, void 0, void 0, funct
         if (!fs.existsSync(directoryPath))
             fs.mkdirSync(directoryPath, { recursive: true });
         fs.writeFileSync(directoryPath + "/" + cid + ".json", JSON.stringify(result));
-        console.log("Input to Prover Constructed: DAG referred to by this cid is in the file named " + cid + ".json");
+        console.log("Input to Prover Constructed: DAG referred to by this cid is in the file " + directoryPath + "/" + cid + ".json");
     }
     catch (err) {
         console.log(err);
