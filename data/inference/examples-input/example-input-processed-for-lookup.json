@@ -1,0 +1,77 @@
+{
+    "C": [
+        {
+            "agent": "K4",
+            "tool": "T1",
+            "dependencies": ["B", "A"]
+        },
+        {
+            "agent": "K5",
+            "tool": "T2",
+            "dependencies": ["V"]
+        }
+    ],
+    "B": [
+        {
+            "agent":"K8",
+            "tool": "T3",
+            "dependencies":["P"]
+        },
+        {
+            "agent": "K3",
+            "tool": "T4",
+            "dependencies": [
+                "L",
+                "M"
+            ]
+        },
+        {
+            "agent": "K5",
+            "tool": "T5",
+            "dependencies": [
+                "J",
+                "M"
+            ]
+        }
+    ],
+    "P": [
+        {
+            "agent": "K7",
+            "tool": "T6",
+            "dependencies": ["C"]
+        },
+        {
+            "agent": "K6",
+            "tool": "T7",
+            "dependencies": ["J", "M"]
+        }
+    ],
+    "A": [
+        {
+            "agent": "K1",
+            "tool": "T8",
+            "dependencies": [
+                "P"
+            ]
+        },
+        {
+            "agent": "K2",
+            "tool": "T9",
+            "dependencies": [
+                "D",
+                "F"
+            ]
+        }
+    ],
+    "N": [
+        {
+            "agent": "K2",
+            "tool": "T10",
+            "dependencies": [
+                "A",
+                "B",
+                "C"
+            ]
+        }
+    ]
+}
