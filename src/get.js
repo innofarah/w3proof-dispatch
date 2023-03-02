@@ -109,7 +109,7 @@ let processFormula = (obj, result) => __awaiter(void 0, void 0, void 0, function
     output["context"] = [];
     for (let contextLink of mainObj["context"]) {
         let cidContext = contextLink["/"];
-        output["contexts"].push(cidContext);
+        output["context"].push(cidContext);
         if (!result["contexts"][cidContext]) {
             let contextObj = yield ipfsGetObj(cidContext);
             result["contexts"][cidContext] = yield processContext(contextObj, result);
