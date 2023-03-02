@@ -60,12 +60,12 @@ let getAllCombinationsFrom = (assertion, resultUnits) => __awaiter(void 0, void 
     let combinations = []; // combination of form {"dependencies": [], "via": []}
     let dependencies = assertion["dependencies"];
     let agent = assertion["agent"];
-    let tool = assertion["tool"];
+    let mode = assertion["mode"];
     // consider 2 initial cases: no dependencies -- one dependency:
     // no dependencies: we should return 
     // with combinations = [{"dependencies":[], "via": [..]}]
     if (dependencies.length == 0)
-        return [{ "dependencies": [], "via": [{ agent, tool }] }];
+        return [{ "dependencies": [], "via": [{ agent, mode }] }];
     // one dependencies: we should return the resultUnits[dependency] as it is since one dependency, no combinations with other dependencies
     // but with adding the current agent? 
     else if (dependencies.length == 1) {
@@ -73,7 +73,7 @@ let getAllCombinationsFrom = (assertion, resultUnits) => __awaiter(void 0, void 
         //console.log(resultUnits)
         if (resultUnits[dependencies[0]]) {
             for (let unit of resultUnits[dependencies[0]]) {
-                let viaPlus = unit["via"].concat([{ agent, tool }]);
+                let viaPlus = unit["via"].concat([{ agent, mode }]);
                 //console.log(viaPlus)
                 let newUnit = { "dependencies": unit["dependencies"], "via": viaPlus };
                 combinations.push(newUnit);
@@ -81,7 +81,7 @@ let getAllCombinationsFrom = (assertion, resultUnits) => __awaiter(void 0, void 
             return combinations;
         }
         else { // if the dependency didn't exist anywhere in the file
-            return [{ "dependencies": dependencies, "via": [{ agent, tool }] }];
+            return [{ "dependencies": dependencies, "via": [{ agent, mode }] }];
         }
     }
     // now if dependencies.length >= 2
@@ -105,7 +105,7 @@ let getAllCombinationsFrom = (assertion, resultUnits) => __awaiter(void 0, void 
         tmp = yield getCartesian(tmp, localResults[keys[i]]);
     }
     for (let unit of tmp) {
-        combinations.push({ "dependencies": unit["dependencies"], "via": unit["via"].concat([{ agent, tool }]) });
+        combinations.push({ "dependencies": unit["dependencies"], "via": unit["via"].concat([{ agent, mode }]) });
     }
     return combinations;
 });
@@ -131,22 +131,30 @@ let processAssertion = (cid, result) => __awaiter(void 0, void 0, void 0, functi
         let assertion = obj;
         if (verifySignature(assertion)) {
             let agent = fingerPrint(assertion["agent"]);
-            let statement = yield ipfsGetObj(assertion["statement"]["/"]);
+            let claim = yield ipfsGetObj(assertion["claim"]["/"]);
             let production = {};
-            if (statement["format"] == "production")
-                production = statement;
-            else if (statement["format"] == "annotated-production")
-                production = yield ipfsGetObj(statement["production"]["/"]);
+            if (claim["format"] == "production")
+                production = claim;
+            else if (claim["format"] == "annotated-production")
+                production = yield ipfsGetObj(claim["production"]["/"]);
             let sequent = yield ipfsGetObj(production["sequent"]["/"]);
             let conclusionCid = sequent["conclusion"]["/"];
             let dependenciesCids = [];
             for (let depLink of sequent["dependencies"]) {
                 dependenciesCids.push(depLink["/"]);
             }
-            let toolCid = production["tool"]["/"];
+            let modeValue = production["mode"];
+            // addressing the currently expecting mode values -- or make it more general here? (anything or ipldLink)
+            //if (mode == null || mode == "axiom" || mode == "conjecture")
+            if (modeValue["/"]) { // case ipldLink (maybe also later should verify cid?)
+                modeValue = modeValue["/"];
+            }
+            else { // case standard string modes
+                // modeValue stays the same
+            }
             let unit = {
                 "agent": agent,
-                "tool": toolCid,
+                "mode": modeValue,
                 "dependencies": dependenciesCids
             };
             if (!result[conclusionCid])

@@ -23,24 +23,24 @@ const { ipfsAddObj, publishDagToCloud } = utilities;
 let publishCommand = (inputPath, target) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         let input = JSON.parse(fs.readFileSync(inputPath)); // json file expected
-        // publish declarations first (because they need to be linked in formulas)
-        // consider an entry in "declarations" (like "fib": ..) in the input file to have two possible values: either [string] or ["ipld:ciddeclarationobjcet"]
+        // publish contexts first (because they need to be linked in formulas)
+        // consider an entry in "contexts" (like "fib": ..) in the input file to have two possible values: either [string] or ["ipld:cidcontextobjcet"]
         // publish according to "format" in the given input file, first we consider the "sequence" format 
         // considering the "format" attribute to be fixed (exists all the time) for all the possible input-formats (considering that input-formats might differ according to format of published objects)
         let format = input["format"];
         let cid = "";
         // maybe do some checking here of the given file structure if correct? 
-        if (format == "declaration") {
+        if (format == "context") {
             // only one declaration object exists in this case
             //let name = Object.keys(input["declarations"])[0]
-            let declarationObj = input["declaration"];
-            cid = yield publishDeclaration(declarationObj);
-            console.log("published declaration object of cid: " + cid);
+            let contextObj = input["context"];
+            cid = yield publishContext(contextObj);
+            console.log("published context object of cid: " + cid);
         }
-        else if (format == "annotated-declaration") {
-            let annotatedDeclarationObj = input["annotated-declaration"];
-            cid = yield publishAnnotatedDeclaration(annotatedDeclarationObj);
-            console.log("published annotated declaration object of cid: " + cid);
+        else if (format == "annotated-context") {
+            let annotatedContextObj = input["annotated-context"];
+            cid = yield publishAnnotatedContext(annotatedContextObj);
+            console.log("published annotated context object of cid: " + cid);
         }
         else if (format == "formula") {
             let formulaObj = input["formula"];
@@ -96,12 +96,12 @@ let publishCommand = (inputPath, target) => __awaiter(void 0, void 0, void 0, fu
     }
 });
 // !!!!!!!!!!!! should add more safety checks - do later (for all the publishing functions)
-let publishDeclaration = (declarationObj) => __awaiter(void 0, void 0, void 0, function* () {
+let publishContext = (contextObj) => __awaiter(void 0, void 0, void 0, function* () {
     // consider an entry in "declaration" (like "fib": ..) in the input file to have two possible values: either [string] or "ipld:ciddeclarationobject"
     // use ipfsAddObj to add the declarations end object
-    let language = declarationObj["language"];
-    let content = declarationObj["content"];
-    let cidLanguage = "", cidContent = "", cidDeclaration = "";
+    let language = contextObj["language"];
+    let content = contextObj["content"];
+    let cidLanguage = "", cidContent = "", cidContext = "";
     if (typeof language == "string" && language.startsWith("ipld:"))
         cidLanguage = language.split(":")[1];
     else {
@@ -122,37 +122,37 @@ let publishDeclaration = (declarationObj) => __awaiter(void 0, void 0, void 0, f
         cidContent = content.split(":")[1];
     else
         cidContent = yield ipfsAddObj(content);
-    let declarationGlobal = {
-        "format": "declaration",
+    let contextGlobal = {
+        "format": "context",
         "language": { "/": cidLanguage },
         "content": { "/": cidContent }
     };
-    let cidObj = yield ipfsAddObj(declarationGlobal);
+    let cidObj = yield ipfsAddObj(contextGlobal);
     //publishedDeclarations[name] = cidObj
-    cidDeclaration = cidObj;
-    return cidDeclaration;
+    cidContext = cidObj;
+    return cidContext;
 });
 // change into annotated  -> what is annotations"?
-let publishAnnotatedDeclaration = (annotatedDeclarationObj) => __awaiter(void 0, void 0, void 0, function* () {
-    let declaration = annotatedDeclarationObj["declaration"];
-    let annotation = annotatedDeclarationObj["annotation"];
-    let cidDeclaration = "", cidAnnotation = "";
-    if (typeof declaration == "string" && declaration.startsWith("ipld:"))
-        cidDeclaration = declaration.split(":")[1];
+let publishAnnotatedContext = (annotatedContextObj) => __awaiter(void 0, void 0, void 0, function* () {
+    let context = annotatedContextObj["context"];
+    let annotation = annotatedContextObj["annotation"];
+    let cidContext = "", cidAnnotation = "";
+    if (typeof context == "string" && context.startsWith("ipld:"))
+        cidContext = context.split(":")[1];
     else {
-        cidDeclaration = yield publishDeclaration(declaration);
+        cidContext = yield publishContext(context);
     }
     if (typeof annotation == "string" && annotation.startsWith("ipld:"))
         cidAnnotation = annotation.split(":")[1];
     else {
         cidAnnotation = yield ipfsAddObj(annotation);
     }
-    let annotatedDeclarationGlobal = {
-        "format": "annotated-declaration",
-        "declaration": { "/": cidDeclaration },
+    let annotatedContextGlobal = {
+        "format": "annotated-context",
+        "context": { "/": cidContext },
         "annotation": { "/": cidAnnotation }
     };
-    let cid = yield ipfsAddObj(annotatedDeclarationGlobal);
+    let cid = yield ipfsAddObj(annotatedContextGlobal);
     //publishedNamedFormulas[name] = cid
     return cid;
 });
@@ -180,21 +180,21 @@ let publishFormula = (formulaObj, input) => __awaiter(void 0, void 0, void 0, fu
         cidContent = content.split(":")[1];
     else
         cidContent = yield ipfsAddObj(content);
-    let declarationNames = formulaObj["declarations"];
-    let declarationLinks = [];
-    for (let declarationName of declarationNames) {
-        let declarationCid = "";
-        if (declarationName.startsWith("ipld:"))
-            declarationCid = declarationName.split(":")[1];
+    let contextNames = formulaObj["context"];
+    let contextLinks = [];
+    for (let contextName of contextNames) {
+        let contextCid = "";
+        if (contextName.startsWith("ipld:"))
+            contextCid = contextName.split(":")[1];
         else
-            declarationCid = yield publishDeclaration(input["declarations"][declarationName]);
-        declarationLinks.push({ "/": declarationCid });
+            contextCid = yield publishContext(input["contexts"][contextName]);
+        contextLinks.push({ "/": contextCid });
     }
     let formulaGlobal = {
         "format": "formula",
         "language": { "/": cidLanguage },
         "content": { "/": cidContent },
-        "declarations": declarationLinks
+        "context": contextLinks
     };
     let cid = yield ipfsAddObj(formulaGlobal);
     //publishedFormulas.push(cid)
@@ -292,22 +292,37 @@ let publishAnnotatedSequent = (annotatedSequentObj, input) => __awaiter(void 0, 
     return cid;
 });
 let publishProduction = (productionObj, input) => __awaiter(void 0, void 0, void 0, function* () {
-    let tool = productionObj["tool"];
+    let mode = productionObj["mode"];
     let sequent = productionObj["sequent"];
+    let modeValue; // the currently expected mode values
     let cidTool = "", cidSequent = "";
     // add spec and checks later that sequent is "ipld:.." or {..}
     if (typeof sequent == "string" && sequent.startsWith("ipld:"))
         cidSequent = sequent.split(":")[1];
-    else {
+    else
         cidSequent = yield publishSequent(sequent, input);
+    // these are just the CURRENTLY known production modes to dispatch
+    // but later, maybe this would be extended : the important point is 
+    //that tools that publish and get global objects have some expected modes,
+    //according to some specification (maybe standard maybe more)
+    // OR maybe make it more general? --> dispatch doesn't check restricted mode values?
+    if (mode == null || mode == "axiom" || mode == "conjecture") {
+        modeValue = mode;
     }
-    if (typeof tool == "string" && tool.startsWith("ipld:"))
-        cidTool = tool.split(":")[1];
+    // other than the expected modes keywords, the current specification of a production,
+    // and what dispatch expects is a "tool" format cid (either directly put in the input 
+    //as ipld:cid or through a profile name which is specific to dispatch 
+    //(but the end result is the same, which is the cid of the tool format object))
+    else if (typeof mode == "string" && mode.startsWith("ipld:")) {
+        cidTool = mode.split(":")[1];
+        modeValue = { "/": cidTool };
+    }
     else {
         try {
             let toolProfiles = JSON.parse(fs.readFileSync(toolprofilespath));
-            if (toolProfiles[tool]) { // assuming the cids in toolProfiles are of "format"="tool" --> check later
-                cidTool = toolProfiles[tool]["tool"];
+            if (toolProfiles[mode]) { // assuming the cids in toolProfiles are of "format"="tool" --> check later
+                cidTool = toolProfiles[mode]["tool"];
+                modeValue = { "/": cidTool };
             }
             else
                 throw new Error("ERROR: given toolProfile name does not exist");
@@ -320,7 +335,7 @@ let publishProduction = (productionObj, input) => __awaiter(void 0, void 0, void
     let productionGlobal = {
         "format": "production",
         "sequent": { "/": cidSequent },
-        "tool": { "/": cidTool }
+        "mode": modeValue
     };
     let cidProduction = yield ipfsAddObj(productionGlobal);
     return cidProduction;
@@ -351,23 +366,23 @@ let publishAnnotatedProduction = (annotatedProductionObj, input) => __awaiter(vo
 // refer to either production or annotatedproduction. how
 let publishAssertion = (assertionObj, input) => __awaiter(void 0, void 0, void 0, function* () {
     let agentProfileName = assertionObj["agent"];
-    let statement = assertionObj["statement"];
-    let cidStatement = "";
-    if (typeof statement == "string" && statement.startsWith("ipld:"))
-        cidStatement = statement.split(":")[1];
+    let claim = assertionObj["claim"];
+    let cidClaim = "";
+    if (typeof claim == "string" && claim.startsWith("ipld:"))
+        cidClaim = claim.split(":")[1];
     else {
         // should do additional checking
-        if (statement["format"] == "production") {
-            cidStatement = yield publishProduction(statement["production"], input);
+        if (claim["format"] == "production") {
+            cidClaim = yield publishProduction(claim["production"], input);
         }
-        else if (statement["format"] == "annotated-production") {
-            let production = statement["production"];
-            let annotation = statement["annotation"];
+        else if (claim["format"] == "annotated-production") {
+            let production = claim["production"];
+            let annotation = claim["annotation"];
             let annotatedProductionObj = {
                 "production": production,
                 "annotation": annotation
             };
-            cidStatement = yield publishAnnotatedProduction(annotatedProductionObj, input);
+            cidClaim = yield publishAnnotatedProduction(annotatedProductionObj, input);
         }
     }
     try {
@@ -375,13 +390,13 @@ let publishAssertion = (assertionObj, input) => __awaiter(void 0, void 0, void 0
         if (agentProfiles[agentProfileName]) {
             let agentProfile = agentProfiles[agentProfileName];
             const sign = crypto.createSign('SHA256');
-            sign.write(cidStatement);
+            sign.write(cidClaim);
             sign.end();
             const signature = sign.sign(agentProfile["private-key"], 'hex');
             let assertionGlobal = {
                 "format": "assertion",
                 "agent": agentProfile["public-key"],
-                "statement": { "/": cidStatement },
+                "claim": { "/": cidClaim },
                 "signature": signature
             };
             let cidAssertion = yield ipfsAddObj(assertionGlobal);
@@ -400,10 +415,10 @@ let publishAssertion = (assertionObj, input) => __awaiter(void 0, void 0, void 0
 let publishGeneric = (element, input) => __awaiter(void 0, void 0, void 0, function* () {
     let cid = "";
     let actualElement = element["element"];
-    if (element["format"] == "declaration")
-        cid = yield publishDeclaration(actualElement);
-    else if (element["format"] == "annotated-declaration")
-        cid = yield publishAnnotatedDeclaration(actualElement);
+    if (element["format"] == "context")
+        cid = yield publishContext(actualElement);
+    else if (element["format"] == "annotated-context")
+        cid = yield publishAnnotatedContext(actualElement);
     else if (element["format"] == "formula")
         cid = yield publishFormula(actualElement, input);
     else if (element["format"] == "annotated-formula")

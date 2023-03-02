@@ -12,7 +12,7 @@ const fs = require('fs');
 const utilities = require("./utilities");
 const { isOfSpecifiedTypes, verifySignature, fingerPrint, ipfsGetObj, ensureFullDAG } = utilities;
 // we need a general get <cid> command that works according to "format":
-// declaration ->
+// context ->
 // formula ->
 // sequent ->
 // production ->
@@ -29,7 +29,7 @@ if (Object.values(filepath).length != 0) {
 else { // if no filepath argument(option) is given
     outputPath = cid + ".json" // the default value for the output file path
 }*/
-// cid refers to: declaration, formula, sequent, production, assertion, collection, etc. // for now
+// cid refers to: context, formula, sequent, production, assertion, collection, etc. // for now
 let getCommand = (cid, directoryPath) => __awaiter(void 0, void 0, void 0, function* () {
     let result = {};
     yield ensureFullDAG(cid);
@@ -39,11 +39,11 @@ let getCommand = (cid, directoryPath) => __awaiter(void 0, void 0, void 0, funct
             if (!isOfSpecifiedTypes(mainObj))
                 throw new Error("ERROR: Retrieved object has unknown/invalid format.");
             let mainObjFormat = mainObj["format"];
-            if (mainObjFormat == "declaration") {
-                yield getDeclaration(cid, mainObj, result);
+            if (mainObjFormat == "context") {
+                yield getContext(cid, mainObj, result);
             }
-            else if (mainObjFormat == "annotated-declaration") {
-                yield getAnnotatedDeclaration(cid, mainObj, result);
+            else if (mainObjFormat == "annotated-context") {
+                yield getAnnotatedContext(cid, mainObj, result);
             }
             else if (mainObjFormat == "formula") {
                 yield getFormula(cid, mainObj, result);
@@ -81,19 +81,19 @@ let getCommand = (cid, directoryPath) => __awaiter(void 0, void 0, void 0, funct
         console.log(err);
     }
 });
-let processDeclaration = (obj, result) => __awaiter(void 0, void 0, void 0, function* () {
+let processContext = (obj, result) => __awaiter(void 0, void 0, void 0, function* () {
     //let declarationObj = await ipfsGetObj(cid)
-    let declarationObj = obj;
-    let declarationOutput = {};
-    let languageCid = declarationObj["language"]["/"];
-    declarationOutput["language"] = languageCid;
+    let contextObj = obj;
+    let contextOutput = {};
+    let languageCid = contextObj["language"]["/"];
+    contextOutput["language"] = languageCid;
     let language = yield ipfsGetObj(languageCid); // should check format "language"
     let langContent = yield ipfsGetObj(language["content"]["/"]);
     result["languages"][languageCid] = {};
     result["languages"][languageCid]["content"] = langContent;
-    let content = yield ipfsGetObj(declarationObj["content"]["/"]);
-    declarationOutput["content"] = content;
-    return declarationOutput;
+    let content = yield ipfsGetObj(contextObj["content"]["/"]);
+    contextOutput["content"] = content;
+    return contextOutput;
 });
 let processFormula = (obj, result) => __awaiter(void 0, void 0, void 0, function* () {
     //let mainObj = await ipfsGetObj(cid)
@@ -106,13 +106,13 @@ let processFormula = (obj, result) => __awaiter(void 0, void 0, void 0, function
     result["languages"][languageCid] = {};
     result["languages"][languageCid]["content"] = langContent;
     output["content"] = yield ipfsGetObj(mainObj["content"]["/"]);
-    output["declarations"] = [];
-    for (let declarationLink of mainObj["declarations"]) {
-        let cidDeclaration = declarationLink["/"];
-        output["declarations"].push(cidDeclaration);
-        if (!result["declarations"][cidDeclaration]) {
-            let declarationObj = yield ipfsGetObj(cidDeclaration);
-            result["declarations"][cidDeclaration] = yield processDeclaration(declarationObj, result);
+    output["context"] = [];
+    for (let contextLink of mainObj["context"]) {
+        let cidContext = contextLink["/"];
+        output["contexts"].push(cidContext);
+        if (!result["contexts"][cidContext]) {
+            let contextObj = yield ipfsGetObj(cidContext);
+            result["contexts"][cidContext] = yield processContext(contextObj, result);
         }
     }
     return output;
@@ -142,32 +142,43 @@ let processProduction = (obj, result) => __awaiter(void 0, void 0, void 0, funct
     let productionOutput = {};
     let sequentObj = yield ipfsGetObj(production["sequent"]["/"]);
     productionOutput["sequent"] = yield processSequent(sequentObj, result);
-    let toolCid = production["tool"]["/"];
-    productionOutput["tool"] = toolCid;
-    let tool = yield ipfsGetObj(toolCid); // should check format "tool"
-    let toolContent = yield ipfsGetObj(tool["content"]["/"]);
-    result["tools"][toolCid] = {};
-    result["tools"][toolCid]["content"] = toolContent;
+    let mode = production["mode"];
+    // addressing expected mode values
+    //if (mode == null || mode == "axiom" || mode == "conjecture") {
+    //    productionOutput["mode"] = mode
+    //}
+    // make it more general --> getting doesn't restrict mode values, it just outputs what exists?
+    if (mode["/"]) { // ipldLink which should refer to a "tool" format object cid
+        let toolCid = production["mode"]["/"];
+        productionOutput["mode"] = toolCid;
+        let tool = yield ipfsGetObj(toolCid); // should check format "tool"
+        let toolContent = yield ipfsGetObj(tool["content"]["/"]);
+        result["tools"][toolCid] = {};
+        result["tools"][toolCid]["content"] = toolContent;
+    }
+    else { // case any
+        productionOutput["mode"] = mode;
+    }
     return productionOutput;
 });
 let processAssertion = (assertion, result) => __awaiter(void 0, void 0, void 0, function* () {
-    let statement = yield ipfsGetObj(assertion["statement"]["/"]);
+    let claim = yield ipfsGetObj(assertion["claim"]["/"]);
     let assertionOutput = {};
     assertionOutput["agent"] = fingerPrint(assertion["agent"]);
-    assertionOutput["statement"] = {};
-    if (statement["format"] == "production") {
-        assertionOutput["statement"]["format"] = "production";
-        assertionOutput["statement"]["production"] = yield processProduction(statement, result);
+    assertionOutput["claim"] = {};
+    if (claim["format"] == "production") {
+        assertionOutput["claim"]["format"] = "production";
+        assertionOutput["claim"]["production"] = yield processProduction(claim, result);
     }
-    else if (statement["format"] == "annotated-production") {
-        assertionOutput["statement"]["format"] = "annotated-production";
-        let productionObj = yield ipfsGetObj(statement["production"]["/"]);
-        assertionOutput["statement"]["production"] = yield processProduction(productionObj, result);
-        assertionOutput["statement"]["annotation"] = yield ipfsGetObj(statement["annotation"]["/"]);
+    else if (claim["format"] == "annotated-production") {
+        assertionOutput["claim"]["format"] = "annotated-production";
+        let productionObj = yield ipfsGetObj(claim["production"]["/"]);
+        assertionOutput["claim"]["production"] = yield processProduction(productionObj, result);
+        assertionOutput["claim"]["annotation"] = yield ipfsGetObj(claim["annotation"]["/"]);
         // later if we add more structure to annotation, we could change the usage of the generic ipfsGetObj
     }
     else {
-        // if we want to add new statement type later
+        // if we want to add new claim type later
     }
     /*let conclusionCid = sequent["conclusion"]["/"]
     assertionOutput["conclusion"] = conclusionCid
@@ -182,12 +193,12 @@ let processAssertion = (assertion, result) => __awaiter(void 0, void 0, void 0, 
     return assertionOutput;
 });
 let processGeneric = (element, result) => __awaiter(void 0, void 0, void 0, function* () {
-    if (element["format"] == "declaration")
-        return yield processDeclaration(element, result);
-    else if (element["format"] == "annotated-declaration") {
+    if (element["format"] == "context")
+        return yield processContext(element, result);
+    else if (element["format"] == "annotated-context") {
         let resElement = {};
-        let declarationObj = yield ipfsGetObj(element["declaration"]["/"]);
-        resElement["declaration"] = yield processDeclaration(declarationObj, result);
+        let contextObj = yield ipfsGetObj(element["context"]["/"]);
+        resElement["context"] = yield processContext(contextObj, result);
         resElement["annotation"] = yield ipfsGetObj(element["annotation"]["/"]);
         return resElement;
     }
@@ -223,27 +234,27 @@ let processGeneric = (element, result) => __awaiter(void 0, void 0, void 0, func
     }
     return null;
 });
-let getDeclaration = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
+let getContext = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
     result["output-for"] = cidObj;
-    result["format"] = "declaration";
+    result["format"] = "context";
     result["languages"] = {};
-    result["declaration"] = yield processDeclaration(obj, result);
+    result["context"] = yield processContext(obj, result);
 });
-let getAnnotatedDeclaration = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
+let getAnnotatedContext = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
     result["output-for"] = cidObj;
-    result["format"] = "annotated-declaration";
-    result["annotated-declaration"] = {};
+    result["format"] = "annotated-context";
+    result["annotated-context"] = {};
     result["languages"] = {};
-    let declarationObj = yield ipfsGetObj(obj["declaration"]["/"]);
-    let declarationOutput = yield processDeclaration(declarationObj, result);
-    result["annotated-declaration"]["declaration"] = declarationOutput;
-    result["annotated-declaration"]["annotation"] = yield ipfsGetObj(obj["annotation"]["/"]);
+    let contextObj = yield ipfsGetObj(obj["context"]["/"]);
+    let contextOutput = yield processContext(contextObj, result);
+    result["annotated-context"]["context"] = contextOutput;
+    result["annotated-context"]["annotation"] = yield ipfsGetObj(obj["annotation"]["/"]);
 });
 let getFormula = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, function* () {
     result["output-for"] = cidObj;
     result["format"] = "formula";
     result["formula"] = {};
-    result["declarations"] = {};
+    result["contexts"] = {};
     result["languages"] = {};
     let formulaOutput = yield processFormula(obj, result);
     result["formula"] = formulaOutput;
@@ -252,7 +263,7 @@ let getAnnotatedFormula = (cidObj, obj, result) => __awaiter(void 0, void 0, voi
     result["output-for"] = cidObj;
     result["format"] = "annotated-formula";
     result["annotated-formula"] = {};
-    result["declarations"] = {};
+    result["contexts"] = {};
     result["languages"] = {};
     let formulaObj = yield ipfsGetObj(obj["formula"]["/"]);
     let formulaOutput = yield processFormula(formulaObj, result);
@@ -264,7 +275,7 @@ let getSequent = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, func
     result["format"] = "sequent";
     result["sequent"] = {}; // notice putting "sequent" instead of "assertion" and "assertions"
     result["formulas"] = {}; // same as assertion and assertions
-    result["declarations"] = {};
+    result["contexts"] = {};
     result["languages"] = {};
     let sequentOutput = yield processSequent(obj, result);
     result["sequent"] = sequentOutput;
@@ -274,7 +285,7 @@ let getAnnotatedSequent = (cidObj, obj, result) => __awaiter(void 0, void 0, voi
     result["format"] = "annotated-sequent";
     result["annotated-sequent"] = {};
     result["formulas"] = {};
-    result["declarations"] = {};
+    result["contexts"] = {};
     result["languages"] = {};
     let sequentObj = yield ipfsGetObj(obj["sequent"]["/"]);
     let sequentOutput = yield processSequent(sequentObj, result);
@@ -286,7 +297,7 @@ let getProduction = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, f
     result["format"] = "production";
     result["production"] = {};
     result["formulas"] = {};
-    result["declarations"] = {};
+    result["contexts"] = {};
     result["languages"] = {};
     result["tools"] = {};
     let productionOutput = yield processProduction(obj, result);
@@ -297,7 +308,7 @@ let getAnnotatedProduction = (cidObj, obj, result) => __awaiter(void 0, void 0, 
     result["format"] = "annotated-production";
     result["annotated-production"] = {};
     result["formulas"] = {};
-    result["declarations"] = {};
+    result["contexts"] = {};
     result["languages"] = {};
     result["tools"] = {};
     let productionObj = yield ipfsGetObj(obj["production"]["/"]);
@@ -309,8 +320,8 @@ let getAssertion = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, fu
     result["output-for"] = cidObj;
     result["format"] = "assertion";
     result["assertion"] = {};
-    result["formulas"] = {}; // possibly many formulas will be linked and thus many declarations too
-    result["declarations"] = {};
+    result["formulas"] = {}; // possibly many formulas will be linked and thus many contexts too
+    result["contexts"] = {};
     result["languages"] = {};
     result["tools"] = {};
     //let assertion = await ipfsGetObj(cidObj)
@@ -330,7 +341,7 @@ let getCollection = (cidObj, obj, result) => __awaiter(void 0, void 0, void 0, f
     result["name"] = obj["name"];
     result["elements"] = [];
     result["formulas"] = {};
-    result["declarations"] = {};
+    result["contexts"] = {};
     result["languages"] = {};
     result["tools"] = {};
     let elementsLinks = obj["elements"];
