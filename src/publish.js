@@ -24,7 +24,7 @@ let publishCommand = (inputPath, target) => __awaiter(void 0, void 0, void 0, fu
     try {
         let input = JSON.parse(fs.readFileSync(inputPath)); // json file expected
         // publish contexts first (because they need to be linked in formulas)
-        // consider an entry in "contexts" (like "fib": ..) in the input file to have two possible values: either [string] or ["ipld:cidcontextobjcet"]
+        // consider an entry in "contexts" (like "fib": ..) in the input file to have two possible values: either [string] or ["damf:cidcontextobjcet"]
         // publish according to "format" in the given input file, first we consider the "sequence" format 
         // considering the "format" attribute to be fixed (exists all the time) for all the possible input-formats (considering that input-formats might differ according to format of published objects)
         let format = input["format"];
@@ -97,12 +97,12 @@ let publishCommand = (inputPath, target) => __awaiter(void 0, void 0, void 0, fu
 });
 // !!!!!!!!!!!! should add more safety checks - do later (for all the publishing functions)
 let publishContext = (contextObj) => __awaiter(void 0, void 0, void 0, function* () {
-    // consider an entry in "declaration" (like "fib": ..) in the input file to have two possible values: either [string] or "ipld:ciddeclarationobject"
+    // consider an entry in "declaration" (like "fib": ..) in the input file to have two possible values: either [string] or "damf:ciddeclarationobject"
     // use ipfsAddObj to add the declarations end object
     let language = contextObj["language"];
     let content = contextObj["content"];
     let cidLanguage = "", cidContent = "", cidContext = "";
-    if (typeof language == "string" && language.startsWith("ipld:"))
+    if (typeof language == "string" && language.startsWith("damf:"))
         cidLanguage = language.split(":")[1];
     else {
         try {
@@ -118,7 +118,7 @@ let publishContext = (contextObj) => __awaiter(void 0, void 0, void 0, function*
             process.exit(0);
         }
     }
-    if (typeof content == "string" && content.startsWith("ipld:"))
+    if (typeof content == "string" && content.startsWith("damf:"))
         cidContent = content.split(":")[1];
     else
         cidContent = yield ipfsAddObj(content);
@@ -137,12 +137,12 @@ let publishAnnotatedContext = (annotatedContextObj) => __awaiter(void 0, void 0,
     let context = annotatedContextObj["context"];
     let annotation = annotatedContextObj["annotation"];
     let cidContext = "", cidAnnotation = "";
-    if (typeof context == "string" && context.startsWith("ipld:"))
+    if (typeof context == "string" && context.startsWith("damf:"))
         cidContext = context.split(":")[1];
     else {
         cidContext = yield publishContext(context);
     }
-    if (typeof annotation == "string" && annotation.startsWith("ipld:"))
+    if (typeof annotation == "string" && annotation.startsWith("damf:"))
         cidAnnotation = annotation.split(":")[1];
     else {
         cidAnnotation = yield ipfsAddObj(annotation);
@@ -160,7 +160,7 @@ let publishFormula = (formulaObj, input) => __awaiter(void 0, void 0, void 0, fu
     let language = formulaObj["language"];
     let content = formulaObj["content"];
     let cidLanguage = "", cidContent = "";
-    if (typeof language == "string" && language.startsWith("ipld:"))
+    if (typeof language == "string" && language.startsWith("damf:"))
         cidLanguage = language.split(":")[1];
     else {
         try {
@@ -176,7 +176,7 @@ let publishFormula = (formulaObj, input) => __awaiter(void 0, void 0, void 0, fu
             process.exit(0);
         }
     }
-    if (typeof content == "string" && content.startsWith("ipld:"))
+    if (typeof content == "string" && content.startsWith("damf:"))
         cidContent = content.split(":")[1];
     else
         cidContent = yield ipfsAddObj(content);
@@ -184,7 +184,7 @@ let publishFormula = (formulaObj, input) => __awaiter(void 0, void 0, void 0, fu
     let contextLinks = [];
     for (let contextName of contextNames) {
         let contextCid = "";
-        if (contextName.startsWith("ipld:"))
+        if (contextName.startsWith("damf:"))
             contextCid = contextName.split(":")[1];
         else
             contextCid = yield publishContext(input["contexts"][contextName]);
@@ -205,12 +205,12 @@ let publishAnnotatedFormula = (annotatedFormulaObj, input) => __awaiter(void 0, 
     let formula = annotatedFormulaObj["formula"];
     let annotation = annotatedFormulaObj["annotation"];
     let cidFormula = "", cidAnnotation = "";
-    if (typeof formula == "string" && formula.startsWith("ipld:"))
+    if (typeof formula == "string" && formula.startsWith("damf:"))
         cidFormula = formula.split(":")[1];
     else {
         cidFormula = yield publishFormula(formula, input);
     }
-    if (typeof annotation == "string" && annotation.startsWith("ipld:"))
+    if (typeof annotation == "string" && annotation.startsWith("damf:"))
         cidAnnotation = annotation.split(":")[1];
     else {
         cidAnnotation = yield ipfsAddObj(annotation);
@@ -227,7 +227,7 @@ let publishAnnotatedFormula = (annotatedFormulaObj, input) => __awaiter(void 0, 
 let publishSequent = (sequentObj, input) => __awaiter(void 0, void 0, void 0, function* () {
     let conclusionName = sequentObj["conclusion"];
     let cidConclusion = "";
-    if (conclusionName.startsWith("ipld:"))
+    if (conclusionName.startsWith("damf:"))
         cidConclusion = conclusionName.split(":")[1];
     else {
         let conclusionObj = input["formulas"][conclusionName];
@@ -242,7 +242,7 @@ let publishSequent = (sequentObj, input) => __awaiter(void 0, void 0, void 0, fu
     let dependenciesIpfs = [];
     for (let dependency of dependenciesNames) {
         let ciddependency = "";
-        if (dependency.startsWith("ipld:")) {
+        if (dependency.startsWith("damf:")) {
             // assuming the cids in "lemmas" should refer to a "formula" object
             //(if we remove the .thc generation and replace it with generation of the output format.json file produced by w3proof-dispatch get)
             ciddependency = dependency.split(":")[1];
@@ -272,12 +272,12 @@ let publishAnnotatedSequent = (annotatedSequentObj, input) => __awaiter(void 0, 
     let sequent = annotatedSequentObj["sequent"];
     let annotation = annotatedSequentObj["annotation"];
     let cidSequent = "", cidAnnotation = "";
-    if (typeof sequent == "string" && sequent.startsWith("ipld:"))
+    if (typeof sequent == "string" && sequent.startsWith("damf:"))
         cidSequent = sequent.split(":")[1];
     else {
         cidSequent = yield publishSequent(sequent, input);
     }
-    if (typeof annotation == "string" && annotation.startsWith("ipld:"))
+    if (typeof annotation == "string" && annotation.startsWith("damf:"))
         cidAnnotation = annotation.split(":")[1];
     else {
         cidAnnotation = yield ipfsAddObj(annotation);
@@ -296,8 +296,8 @@ let publishProduction = (productionObj, input) => __awaiter(void 0, void 0, void
     let sequent = productionObj["sequent"];
     let modeValue; // the currently expected mode values
     let cidTool = "", cidSequent = "";
-    // add spec and checks later that sequent is "ipld:.." or {..}
-    if (typeof sequent == "string" && sequent.startsWith("ipld:"))
+    // add spec and checks later that sequent is "damf:.." or {..}
+    if (typeof sequent == "string" && sequent.startsWith("damf:"))
         cidSequent = sequent.split(":")[1];
     else
         cidSequent = yield publishSequent(sequent, input);
@@ -311,9 +311,9 @@ let publishProduction = (productionObj, input) => __awaiter(void 0, void 0, void
     }
     // other than the expected modes keywords, the current specification of a production,
     // and what dispatch expects is a "tool" format cid (either directly put in the input 
-    //as ipld:cid or through a profile name which is specific to dispatch 
+    //as damf:cid or through a profile name which is specific to dispatch 
     //(but the end result is the same, which is the cid of the tool format object))
-    else if (typeof mode == "string" && mode.startsWith("ipld:")) {
+    else if (typeof mode == "string" && mode.startsWith("damf:")) {
         cidTool = mode.split(":")[1];
         modeValue = { "/": cidTool };
     }
@@ -344,12 +344,12 @@ let publishAnnotatedProduction = (annotatedProductionObj, input) => __awaiter(vo
     let production = annotatedProductionObj["production"];
     let annotation = annotatedProductionObj["annotation"];
     let cidProduction = "", cidAnnotation = "";
-    if (typeof production == "string" && production.startsWith("ipld:"))
+    if (typeof production == "string" && production.startsWith("damf:"))
         cidProduction = production.split(":")[1];
     else {
         cidProduction = yield publishProduction(production, input);
     }
-    if (typeof annotation == "string" && annotation.startsWith("ipld:"))
+    if (typeof annotation == "string" && annotation.startsWith("damf:"))
         cidAnnotation = annotation.split(":")[1];
     else {
         cidAnnotation = yield ipfsAddObj(annotation);
@@ -368,7 +368,7 @@ let publishAssertion = (assertionObj, input) => __awaiter(void 0, void 0, void 0
     let agentProfileName = assertionObj["agent"];
     let claim = assertionObj["claim"];
     let cidClaim = "";
-    if (typeof claim == "string" && claim.startsWith("ipld:"))
+    if (typeof claim == "string" && claim.startsWith("damf:"))
         cidClaim = claim.split(":")[1];
     else {
         // should do additional checking
