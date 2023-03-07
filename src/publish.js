@@ -115,7 +115,7 @@ let publishContext = (contextObj) => __awaiter(void 0, void 0, void 0, function*
         }
         catch (error) {
             console.error(error);
-            process.exit(0);
+            process.exit(1);
         }
     }
     if (typeof content == "string" && content.startsWith("damf:"))
@@ -173,7 +173,7 @@ let publishFormula = (formulaObj, input) => __awaiter(void 0, void 0, void 0, fu
         }
         catch (error) {
             console.error(error);
-            process.exit(0);
+            process.exit(1);
         }
     }
     if (typeof content == "string" && content.startsWith("damf:"))
@@ -329,7 +329,7 @@ let publishProduction = (productionObj, input) => __awaiter(void 0, void 0, void
         }
         catch (error) {
             console.error(error);
-            process.exit(0);
+            process.exit(1);
         }
     }
     let productionGlobal = {
@@ -408,7 +408,7 @@ let publishAssertion = (assertionObj, input) => __awaiter(void 0, void 0, void 0
     }
     catch (error) {
         console.error(error);
-        process.exit(0);
+        process.exit(1);
     }
 });
 // also needs more checking
